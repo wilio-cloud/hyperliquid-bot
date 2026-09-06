@@ -85,7 +85,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="card-table">
             <div class="table-title">
                 <span>📊 Monitor de Spreads i Funding en Temps Real</span>
-                <span style="font-size: 0.8rem; font-weight: normal; color: #94a3b8;">Llindar mínim: <b style="color: #10b981;">±0.180%</b> (Marge Net Garantit)</span>
+                <span style="font-size: 0.8rem; font-weight: normal; color: #94a3b8;" id="min-spread-label">Llindar mínim: <b style="color: #10b981;">±0.150%</b> (Marge Net Garantit)</span>
             </div>
             <table>
                 <thead>
@@ -217,20 +217,30 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 document.getElementById('uptime').innerText = 'Temps actiu: ' + (data.uptime || '-');
 
                 // Taula Spreads
+                const minSpreadVal = (typeof m.min_spread === 'number') ? m.min_spread : 0.150;
+                const minSpreadLabel = document.getElementById('min-spread-label');
+                if (minSpreadLabel) {
+                    minSpreadLabel.innerHTML = `Llindar mínim: <b style="color: #10b981;">±${minSpreadVal.toFixed(3)}%</b> (Marge Net Garantit)`;
+                }
+
                 const spreadsBody = document.getElementById('spreads-body');
                 if (data.spreads && data.spreads.length > 0) {
                     spreadsBody.innerHTML = data.spreads.map(s => {
                         const spreadVal = s.spread_pct || 0.0;
-                        const spreadColor = Math.abs(spreadVal) >= 0.180 ? 'green' : (Math.abs(spreadVal) >= 0.120 ? 'yellow' : 'white');
+                        const spreadColor = Math.abs(spreadVal) >= minSpreadVal ? 'green' : (Math.abs(spreadVal) >= (minSpreadVal * 0.7) ? 'yellow' : 'white');
+
                         let signalTag = '<span class="tag-neutral">NORMAL</span>';
-                        if (spreadVal >= 0.180) {
-                            signalTag = `<span class="tag-signal tag-buy">🔥 SELL HL / BUY ${v2Short}</span>`;
-                        } else if (spreadVal <= -0.180) {
-                            signalTag = `<span class="tag-signal tag-sell">🔥 BUY HL / SELL ${v2Short}</span>`;
-                        } else if (Math.abs(spreadVal) >= 0.120) {
-                            signalTag = '<span class="tag-signal" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #38bdf8;">⏳ APROP (' + Math.abs(spreadVal).toFixed(3) + '%)</span>';
-                        } else if (Math.abs(s.annual_funding_diff_apr || 0) >= 15.0) {
+                        if (s.signal_type === 'SIGNAL') {
+                            const isBuy = (s.signal_status || '').includes('BUY HL');
+                            signalTag = `<span class="tag-signal ${isBuy ? 'tag-buy' : 'tag-sell'}">${s.signal_status}</span>`;
+                        } else if (s.signal_type === 'BLOCKED') {
+                            signalTag = `<span class="tag-signal" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid #f87171;">${s.signal_status}</span>`;
+                        } else if (s.signal_type === 'APROP') {
+                            signalTag = `<span class="tag-signal" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #38bdf8;">${s.signal_status}</span>`;
+                        } else if (s.signal_type === 'HARVEST') {
                             signalTag = '<span class="tag-signal" style="background: rgba(250, 204, 21, 0.15); color: #facc15; border: 1px solid #facc15;">💰 HARVEST APR</span>';
+                        } else if (s.signal_status) {
+                            signalTag = `<span class="tag-neutral">${s.signal_status}</span>`;
                         }
 
                         const apr = s.annual_funding_diff_apr || 0;

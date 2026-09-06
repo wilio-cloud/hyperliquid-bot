@@ -299,6 +299,32 @@ def test_dynamic_position_sizing():
 
     print("  Dynamic Position Sizing (interès compost) verificat amb èxit.")
 
+def test_dashboard_signal_status_accuracy():
+    """Verifica que el tauler no mostra senyals falses de foc si el spread executable és insuficient."""
+    from main import ArbitrageTradingBotApp
+    app = ArbitrageTradingBotApp(
+        coins=["SOL"],
+        initial_balance=1000.0,
+        min_spread=0.150,
+        max_book_spread=0.160,
+    )
+    # HL té Bid 105.71, Ask 105.73 (Mid 105.72)
+    # dYdX té Bid 105.78, Ask 105.88 (Mid 105.83)
+    # Mid diff = -0.104%
+    # Executable BUY HL / SELL dYdX = (105.78 - 105.73) / 105.775 = +0.047% (INSUFICIENT per a 0.150%)
+    # Executable SELL HL / BUY dYdX = (105.71 - 105.88) = -0.160% (Pèrdua)
+    app.strategy.update_hl_book(OrderBookL2(coin="SOL", timestamp=1.0, bids=[BookLevel(price=105.71, size=10)], asks=[BookLevel(price=105.73, size=10)]))
+    app.strategy.update_bn_book(OrderBookL2(coin="SOL", timestamp=1.0, bids=[BookLevel(price=105.78, size=10)], asks=[BookLevel(price=105.88, size=10)]))
+
+    data = app.get_dashboard_data()
+    sol_data = data["spreads"][0]
+
+    # No ha de mostrar senyal de foc falsa
+    assert sol_data["signal_type"] != "SIGNAL", f"No hauria de ser SIGNAL: {sol_data}"
+    assert "🔥" not in sol_data["signal_status"], f"No hauria de contenir foc: {sol_data['signal_status']}"
+    assert sol_data["exec_spread_pct"] < 0.150
+    print("  Precisió de senyals del tauler verificada amb èxit.")
+
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
     test_arbitrage_execution_and_pnl()
@@ -307,4 +333,5 @@ if __name__ == "__main__":
     test_dydx_venue2_integration()
     test_book_spread_guard_blocks_illiquid_entry()
     test_dynamic_position_sizing()
+    test_dashboard_signal_status_accuracy()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")

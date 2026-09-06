@@ -234,12 +234,46 @@ class ArbitrageTradingBotApp:
         for coin in self.coins:
             info = self.strategy.calculate_spread_info(coin)
             if info:
-                spread_val = info.spread_sell_hl_buy_bn_pct if abs(info.spread_sell_hl_buy_bn_pct) >= abs(info.spread_buy_hl_sell_bn_pct) else -info.spread_buy_hl_sell_bn_pct
+                # 1. Spread mid real (% de diferència entre el preu mig de HL i el segon exchange)
+                global_mid = (info.hl_mid + info.bn_mid) / 2.0
+                mid_spread_pct = ((info.hl_mid - info.bn_mid) / global_mid) * 100.0 if global_mid > 0 else 0.0
+
+                # 2. Spread executable net real (el màxim guany executable entre les dues direccions)
+                best_exec_pct = max(info.spread_sell_hl_buy_bn_pct, info.spread_buy_hl_sell_bn_pct)
+
+                # 3. Comprovació de llibre i senyal real
+                hl_book = self.strategy.hl_books.get(coin)
+                bn_book = self.strategy.bn_books.get(coin)
+                hl_inner = ((hl_book.best_ask - hl_book.best_bid) / hl_book.mid_price) * 100.0 if (hl_book and hl_book.mid_price) else 0.0
+                bn_inner = ((bn_book.best_ask - bn_book.best_bid) / bn_book.mid_price) * 100.0 if (bn_book and bn_book.mid_price) else 0.0
+                max_inner = max(hl_inner, bn_inner)
+
+                sig = self.strategy.evaluate_entry(coin)
+                if sig:
+                    signal_type = "SIGNAL"
+                    dir_str = "SELL HL / BUY " if sig.direction == ArbitrageDirection.SELL_HL_BUY_BN else "BUY HL / SELL "
+                    signal_status = f"🔥 {dir_str}{self.venue2_label}"
+                elif max_inner > self.strategy.max_book_spread_pct:
+                    signal_type = "BLOCKED"
+                    signal_status = f"⚠️ LLIBRE AMPLI ({max_inner:.2f}%)"
+                elif best_exec_pct >= (self.strategy.min_entry_spread_pct * 0.65):
+                    signal_type = "APROP"
+                    signal_status = f"⏳ APROP ({best_exec_pct:.3f}%)"
+                elif abs(info.annual_funding_diff_apr) >= 15.0:
+                    signal_type = "HARVEST"
+                    signal_status = "💰 HARVEST APR"
+                else:
+                    signal_type = "NORMAL"
+                    signal_status = "NORMAL"
+
                 spreads.append({
                     "coin": coin,
                     "hl_price": info.hl_mid,
                     "bn_price": info.bn_mid,
-                    "spread_pct": spread_val,
+                    "spread_pct": mid_spread_pct,
+                    "exec_spread_pct": best_exec_pct,
+                    "signal_status": signal_status,
+                    "signal_type": signal_type,
                     "hl_funding_8h": info.hl_funding_8h_pct,
                     "bn_funding_8h": info.bn_funding_8h_pct,
                     "annual_funding_diff_apr": info.annual_funding_diff_apr,
@@ -282,6 +316,8 @@ class ArbitrageTradingBotApp:
         metrics["dynamic_size"] = self.dynamic_size
         metrics["current_order_size"] = current_size
         metrics["size_pct"] = self.size_pct
+        metrics["min_spread"] = self.strategy.min_entry_spread_pct
+        metrics["max_book_spread"] = self.strategy.max_book_spread_pct
 
         return {
             "metrics": metrics,
@@ -460,10 +496,10 @@ class DirectionalScalperApp:
         await self.ws_client.stop()
 
 def main():
-    min_spread_default = float(os.environ.get("MIN_SPREAD", "0.180"))
+    min_spread_default = float(os.environ.get("MIN_SPREAD", "0.150"))
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
     max_positions_default = int(os.environ.get("MAX_POSITIONS", "3"))
-    max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.120"))
+    max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.160"))
     venue2_default = os.environ.get("VENUE2", "dydx").lower()
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
     leverage_default = float(os.environ.get("LEVERAGE", "2.0"))
@@ -485,10 +521,10 @@ def main():
     parser.add_argument("--size-pct", type=float, default=size_pct_default, help="Percentatge del capital total per a cada ordre (default: 30.0%%)")
     parser.add_argument("--min-size", type=float, default=min_size_default, help="Mida mínima d'ordre en dòlars (default: 100.0$)")
     parser.add_argument("--max-size", type=float, default=max_size_default, help="Límit màxim de mida per seguretat de llibre (default: 2500.0$)")
-    parser.add_argument("--min-spread", type=float, default=min_spread_default, help="Spread mínim percentual d'entrada per a l'arbitratge (default: 0.180%%)")
+    parser.add_argument("--min-spread", type=float, default=min_spread_default, help="Spread mínim percentual d'entrada per a l'arbitratge (default: 0.150%%)")
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
     parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 3)")
-    parser.add_argument("--max-book-spread", type=float, default=max_book_spread_default, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.120%%)")
+    parser.add_argument("--max-book-spread", type=float, default=max_book_spread_default, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.160%%)")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
     parser.add_argument("--no-burst", action="store_true", help="Desactivar Volume Burst (només scalper)")

@@ -17,14 +17,14 @@ logger = logging.getLogger("CrossArbitrage")
 class CrossExchangeArbitrageStrategy:
     def __init__(
         self,
-        min_entry_spread_pct: float = 0.180,   # Dislocació mínima d'entrada (+0.180% per cobrir comissions i garantir guany)
+        min_entry_spread_pct: float = 0.150,   # Dislocació mínima d'entrada (+0.150% per cobrir comissions i garantir guany net)
         target_exit_spread_pct: float = 0.010, # Convergència de sortida (<= +0.010%)
         min_profit_usd: float = 0.05,          # Benefici net mínim permes a la convergència (+0.05$)
         take_profit_usd: float = 0.50,         # Tancament automàtic per benefici substancial (+0.50$)
         max_divergence_pct: float = 2.50,      # Stop de divergència (+2.50% addicional per a deslligaments reals, no metxes de 1 cèntim)
         divergence_min_duration_sec: float = 60.0, # Requereix que la divergència sigui sostinguda almenys 60 segons
         max_hold_seconds: int = 43200,         # 12 hores màxim per posició (permet collir funding passiu)
-        max_book_spread_pct: float = 0.120,    # Llindar màxim d'spread intern (rebutja llibres buits o il·líquids)
+        max_book_spread_pct: float = 0.160,    # Llindar màxim d'spread intern (apte per a BTC/ETH/SOL a dYdX i HL, bloqueja il·líquids)
     ):
         self.name = "CROSS_ARBITRAGE"
         self.min_entry_spread_pct = min_entry_spread_pct
