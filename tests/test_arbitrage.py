@@ -267,6 +267,38 @@ def test_book_spread_guard_blocks_illiquid_entry():
     assert sig2.direction == ArbitrageDirection.BUY_HL_SELL_BN
     print("  Filtre de salut del llibre d'ordres (Book Spread Guard) verificat amb èxit.")
 
+def test_dynamic_position_sizing():
+    """Verifica que la mida d'ordre s'ajusta automàticament segons l'interès compost."""
+    from main import ArbitrageTradingBotApp
+    app = ArbitrageTradingBotApp(
+        coins=["BTC", "ETH", "SOL"],
+        initial_balance=1000.0,
+        leverage=2.0,
+        dynamic_size=True,
+        size_pct=30.0,
+        min_size_usd=100.0,
+        max_size_usd=2500.0,
+    )
+    # Amb 1.000$ (500$ a cada exchange), mida = 1.000 * 0.30 = 300.0$
+    assert app.calculate_order_size() == 300.0
+
+    # Simulem creixement a 1.500$ (750$ a cada exchange)
+    app.exchange.hl_balance_usd = 750.0
+    app.exchange.bn_balance_usd = 750.0
+    assert app.calculate_order_size() == 450.0
+
+    # Simulem asimetria (600$ a HL, 800$ a dYdX) -> usa min_balance (600$) * 2 = 1200 * 0.30 = 360.0$
+    app.exchange.hl_balance_usd = 600.0
+    app.exchange.bn_balance_usd = 800.0
+    assert app.calculate_order_size() == 360.0
+
+    # Simulem límit màxim de liquiditat (10.000$ -> 3.000$ calculat, però limitat a max_size 2.500$)
+    app.exchange.hl_balance_usd = 5000.0
+    app.exchange.bn_balance_usd = 5000.0
+    assert app.calculate_order_size() == 2500.0
+
+    print("  Dynamic Position Sizing (interès compost) verificat amb èxit.")
+
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
     test_arbitrage_execution_and_pnl()
@@ -274,4 +306,5 @@ if __name__ == "__main__":
     test_profit_guard_blocks_unprofitable_convergence()
     test_dydx_venue2_integration()
     test_book_spread_guard_blocks_illiquid_entry()
+    test_dynamic_position_sizing()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")

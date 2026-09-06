@@ -56,6 +56,10 @@ class ArbitrageTradingBotApp:
         max_book_spread: float = 0.120,
         initial_balance: float = 1000.0,
         leverage: float = 2.0,
+        dynamic_size: bool = True,
+        size_pct: float = 30.0,
+        min_size_usd: float = 100.0,
+        max_size_usd: float = 2500.0,
     ):
         self.coins = coins
         self.venue2 = venue2.lower()
@@ -64,6 +68,10 @@ class ArbitrageTradingBotApp:
         self.headless = headless
         self.max_positions = max_positions
         self.leverage = leverage
+        self.dynamic_size = dynamic_size
+        self.size_pct = size_pct
+        self.min_size_usd = min_size_usd
+        self.max_size_usd = max_size_usd
         self.start_time = time.time()
 
         initial_hl = initial_balance / 2.0
@@ -108,6 +116,21 @@ class ArbitrageTradingBotApp:
         self.is_running = False
         self._sync_task: Optional[asyncio.Task] = None
         self._funding_accrual_task: Optional[asyncio.Task] = None
+
+    def calculate_order_size(self) -> float:
+        """
+        Calcula la mida d'ordre dinàmica basada en interès compost.
+        Si dynamic_size és True, usa el percentatge 'size_pct' del capital total disponible.
+        Exemple: Amb 1.000$ de capital (500$ per pota) i 30% -> 300$ per pota.
+        Si el capital creix a 1.500$ -> 450$ per pota.
+        """
+        if not self.dynamic_size:
+            return self.size_usd
+
+        min_bal = min(self.exchange.hl_balance_usd, self.exchange.bn_balance_usd)
+        total_sym_equity = min_bal * 2.0
+        target = total_sym_equity * (self.size_pct / 100.0)
+        return max(self.min_size_usd, min(round(target, 1), self.max_size_usd))
 
     def _on_pair_open(self, pos: ArbitragePosition):
         if self.headless:
@@ -168,7 +191,8 @@ class ArbitrageTradingBotApp:
         if not self.exchange.has_open_position(coin) and len(self.exchange.active_positions) < self.max_positions:
             sig = self.strategy.evaluate_entry(coin)
             if sig:
-                self.exchange.open_arbitrage_position(sig, size_usd=self.size_usd, is_maker=False)
+                order_sz = self.calculate_order_size()
+                self.exchange.open_arbitrage_position(sig, size_usd=order_sz, is_maker=False)
 
     async def _run_hl_meta_sync_loop(self):
         """Sincronitza Funding Rates oficials de Hyperliquid cada 30 segons."""
@@ -253,8 +277,14 @@ class ArbitrageTradingBotApp:
             }
             for p in self.exchange.closed_positions[-15:]
         ]
+        metrics = self.exchange.metrics.copy()
+        current_size = self.calculate_order_size()
+        metrics["dynamic_size"] = self.dynamic_size
+        metrics["current_order_size"] = current_size
+        metrics["size_pct"] = self.size_pct
+
         return {
-            "metrics": self.exchange.metrics,
+            "metrics": metrics,
             "spreads": spreads,
             "positions": positions,
             "recent_closed": recent_closed,
@@ -437,7 +467,11 @@ def main():
     venue2_default = os.environ.get("VENUE2", "dydx").lower()
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
     leverage_default = float(os.environ.get("LEVERAGE", "2.0"))
+    dynamic_size_default = os.environ.get("DYNAMIC_SIZE", "true").lower() in ("true", "1", "yes")
+    size_pct_default = float(os.environ.get("SIZE_PCT", "30.0"))
     size_default = float(os.environ.get("SIZE", "300.0"))
+    min_size_default = float(os.environ.get("MIN_SIZE", "100.0"))
+    max_size_default = float(os.environ.get("MAX_SIZE", "2500.0"))
 
     parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + dYdX / Binance)")
     parser.add_argument("--mode", choices=["arbitrage", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (recomanat) o 'scalper'")
@@ -446,6 +480,11 @@ def main():
     parser.add_argument("--initial-balance", type=float, default=initial_balance_default, help="Capital inicial total en dòlars (default: 1000.0$)")
     parser.add_argument("--leverage", type=float, default=leverage_default, help="Apalancament conservador per a l'arbitratge (default: 2.0x)")
     parser.add_argument("--size", type=float, default=size_default, help="Mida en dòlars per ordre/pota (default: 300.0$)")
+    parser.add_argument("--dynamic-size", dest="dynamic_size", action="store_true", default=dynamic_size_default, help="Ajustar automàticament la mida per interès compost (default: True)")
+    parser.add_argument("--no-dynamic-size", dest="dynamic_size", action="store_false", help="Desactivar mida dinàmica i utilitzar mida fixa")
+    parser.add_argument("--size-pct", type=float, default=size_pct_default, help="Percentatge del capital total per a cada ordre (default: 30.0%%)")
+    parser.add_argument("--min-size", type=float, default=min_size_default, help="Mida mínima d'ordre en dòlars (default: 100.0$)")
+    parser.add_argument("--max-size", type=float, default=max_size_default, help="Límit màxim de mida per seguretat de llibre (default: 2500.0$)")
     parser.add_argument("--min-spread", type=float, default=min_spread_default, help="Spread mínim percentual d'entrada per a l'arbitratge (default: 0.180%%)")
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
     parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 3)")
@@ -470,6 +509,10 @@ def main():
             max_book_spread=args.max_book_spread,
             initial_balance=args.initial_balance,
             leverage=args.leverage,
+            dynamic_size=args.dynamic_size,
+            size_pct=args.size_pct,
+            min_size_usd=args.min_size,
+            max_size_usd=args.max_size,
         )
     else:
         coins = args.coins or ["BTC"]

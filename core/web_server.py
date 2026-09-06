@@ -198,7 +198,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const totalBal = (typeof m.balance === 'number') ? m.balance : 1000.0;
                 document.getElementById('balance').innerText = totalBal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' $';
                 if (m.hl_balance !== undefined && m.bn_balance !== undefined) {
-                    document.getElementById('balance-sub').innerText = `HL: ${m.hl_balance.toFixed(2)}$ | ${v2Short}: ${m.bn_balance.toFixed(2)}$`;
+                    const szTxt = m.current_order_size ? ` • Ordre: ${m.current_order_size.toFixed(0)}$ (${m.size_pct || 30}% compost)` : '';
+                    document.getElementById('balance-sub').innerText = `HL: ${m.hl_balance.toFixed(2)}$ | ${v2Short}: ${m.bn_balance.toFixed(2)}$${szTxt}`;
                 }
 
                 const pnlEl = document.getElementById('pnl');
