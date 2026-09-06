@@ -250,7 +250,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     }).join('');
                 } else {
                     posCount.innerText = "0 posicions";
-                    posBody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b;">Sense posicions d\'arbitratge actives actualment</td></tr>';
+                    posBody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b;">Sense posicions actives en curs</td></tr>';
                 }
 
                 // Taula Tancades
