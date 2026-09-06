@@ -16,6 +16,7 @@ from config.settings import config
 from core.arbitrage_models import ArbitrageDirection, ArbitragePosition, ArbitrageSignal
 from core.arbitrage_paper_exchange import ArbitragePaperExchange
 from core.binance_ws_client import BinanceFuturesWSClient, get_ssl_context
+from core.dydx_ws_client import DydxV4WSClient
 from core.models import OrderBookL2, OrderSide, Signal, Trade
 from core.paper_exchange import PaperExchange
 from core.risk_manager import RiskManager
@@ -46,12 +47,15 @@ class ArbitrageTradingBotApp:
     def __init__(
         self,
         coins: List[str],
+        venue2: str = "dydx",
         min_spread: float = 0.180,
         exit_spread: float = 0.010,
         size_usd: float = 1000.0,
         headless: bool = False,
     ):
         self.coins = coins
+        self.venue2 = venue2.lower()
+        self.venue2_label = "dYdX v4" if self.venue2 == "dydx" else "Binance"
         self.size_usd = size_usd
         self.headless = headless
         self.start_time = time.time()
@@ -59,6 +63,7 @@ class ArbitrageTradingBotApp:
         self.exchange = ArbitragePaperExchange(
             initial_hl_balance=5000.0,
             initial_bn_balance=5000.0,
+            venue2_name=self.venue2,
             on_open_cb=self._on_pair_open,
             on_close_cb=self._on_pair_close,
         )
@@ -70,11 +75,19 @@ class ArbitrageTradingBotApp:
             coins=self.coins,
             on_book_update=self.handle_hl_book,
         )
-        self.bn_ws = BinanceFuturesWSClient(
-            coins=self.coins,
-            on_book_update=self.handle_bn_book,
-            on_funding_update=self.handle_bn_funding,
-        )
+        if self.venue2 == "dydx":
+            self.venue2_ws = DydxV4WSClient(
+                coins=self.coins,
+                on_book_update=self.handle_venue2_book,
+                on_funding_update=self.handle_venue2_funding,
+            )
+        else:
+            self.venue2_ws = BinanceFuturesWSClient(
+                coins=self.coins,
+                on_book_update=self.handle_venue2_book,
+                on_funding_update=self.handle_venue2_funding,
+            )
+
         self.web_server = WebDashboardServer(
             exchange=self.exchange,
             start_time=self.start_time,
@@ -90,7 +103,7 @@ class ArbitrageTradingBotApp:
             print(
                 f"  ⚡ [ARB OBERT] {pos.coin} {pos.direction.value} | "
                 f"HL: {pos.leg_hl.entry_price:.2f} ({pos.leg_hl.side.value}) | "
-                f"BN: {pos.leg_bn.entry_price:.2f} ({pos.leg_bn.side.value}) | "
+                f"{pos.leg_bn.venue}: {pos.leg_bn.entry_price:.2f} ({pos.leg_bn.side.value}) | "
                 f"Spread: {pos.entry_spread_pct:+.3f}% | Mida: {pos.leg_hl.size_usd:.0f}$ x 2"
             )
 
@@ -111,12 +124,12 @@ class ArbitrageTradingBotApp:
         self.exchange.on_hl_book(book)
         self._check_coin_state(book.coin)
 
-    def handle_bn_book(self, book: OrderBookL2):
+    def handle_venue2_book(self, book: OrderBookL2):
         self.strategy.update_bn_book(book)
         self.exchange.on_bn_book(book)
         self._check_coin_state(book.coin)
 
-    def handle_bn_funding(self, funding_dict: Dict[str, float]):
+    def handle_venue2_funding(self, funding_dict: Dict[str, float]):
         self.strategy.update_bn_funding(funding_dict)
 
     def _check_coin_state(self, coin: str):
@@ -239,7 +252,7 @@ class ArbitrageTradingBotApp:
     async def run(self, duration_sec: int = 0):
         self.is_running = True
         await self.hl_ws.start()
-        await self.bn_ws.start()
+        await self.venue2_ws.start()
         await self.web_server.start()
         self._sync_task = asyncio.create_task(self._run_hl_meta_sync_loop())
         self._funding_accrual_task = asyncio.create_task(self._run_hourly_funding_loop())
@@ -253,7 +266,7 @@ class ArbitrageTradingBotApp:
                         if duration_sec > 0 and (time.time() - self.start_time) >= duration_sec:
                             break
             else:
-                print(f"Bot d'Arbitratge Delta-Neutral en marxa (Headless). Monitoritzant {self.coins}...")
+                print(f"Bot d'Arbitratge Delta-Neutral en marxa (Hyperliquid vs {self.venue2_label}) [Headless]. Monedes: {self.coins}...")
                 while self.is_running:
                     await asyncio.sleep(1.0)
                     if duration_sec > 0 and (time.time() - self.start_time) >= duration_sec:
@@ -270,16 +283,17 @@ class ArbitrageTradingBotApp:
                 t.cancel()
         await self.web_server.stop()
         await self.hl_ws.stop()
-        await self.bn_ws.stop()
+        await self.venue2_ws.stop()
         self.print_summary()
 
     def print_summary(self):
-        console.print("\n[bold cyan]═══ RESUM FINAL SESSIÓ ARBITRATGE DELTA-NEUTRAL ═══[/bold cyan]")
+        console.print(f"\n[bold cyan]═══ RESUM FINAL SESSIÓ ARBITRATGE DELTA-NEUTRAL (HL vs {self.venue2_label}) ═══[/bold cyan]")
         m = self.exchange.metrics
         pnl = m["net_pnl"]
         pnl_color = "green" if pnl >= 0 else "red"
+        v2_name = m.get("venue2_name", "VENUE2")
         console.print(f"Balanç Inicial: [white]{m['initial_balance']:,.2f}$[/white]")
-        console.print(f"Balanç Final:   [white]{m['balance']:,.2f}$[/white] (HL: {m['hl_balance']:,.2f}$ | BN: {m['bn_balance']:,.2f}$)")
+        console.print(f"Balanç Final:   [white]{m['balance']:,.2f}$[/white] (HL: {m['hl_balance']:,.2f}$ | {v2_name}: {m['bn_balance']:,.2f}$)")
         console.print(f"PnL Net Total:  [{pnl_color}]{pnl:+,.3f}$[/]")
         console.print(f"Funding Cobrat: [bold green]{m['total_funding']:+,.4f}$[/bold green]")
         console.print(f"Total Trades:   {m['total_trades']} (Guanyats: {m['wins']}, Perduts: {m['losses']})")
@@ -407,8 +421,10 @@ class DirectionalScalperApp:
 def main():
     min_spread_default = float(os.environ.get("MIN_SPREAD", "0.180"))
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
-    parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + Binance)")
+    venue2_default = os.environ.get("VENUE2", "dydx").lower()
+    parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + dYdX / Binance)")
     parser.add_argument("--mode", choices=["arbitrage", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (recomanat) o 'scalper'")
+    parser.add_argument("--venue2", choices=["dydx", "binance"], default=venue2_default, help="Segon exchange per a l'arbitratge: 'dydx' (100%% DEX descentralitzat, legal a la UE/Espanya) o 'binance'")
     parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL LINK NEAR SUI DOGE)")
     parser.add_argument("--min-spread", type=float, default=min_spread_default, help="Spread mínim percentual d'entrada per a l'arbitratge (default: 0.180%%)")
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
@@ -423,6 +439,7 @@ def main():
         coins = args.coins or ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
         app = ArbitrageTradingBotApp(
             coins=coins,
+            venue2=args.venue2,
             min_spread=args.min_spread,
             exit_spread=args.exit_spread,
             size_usd=args.size,

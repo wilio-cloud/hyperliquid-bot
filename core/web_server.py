@@ -9,7 +9,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arbitratge Delta-Neutral • Hyperliquid vs Binance</title>
+    <title>Arbitratge Delta-Neutral • Hyperliquid DEX</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         body { background: #0b0f19; color: #f8fafc; padding: 16px; }
@@ -45,7 +45,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <header>
             <div>
                 <h1>⚡ Arbitratge Delta-Neutral <span class="badge">EN VIU</span></h1>
-                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;">Hyperliquid DEX vs Binance Futures • 0% Risc Direccional</div>
+                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="header-sub">Hyperliquid DEX vs dYdX v4 • 100% Descentralitzat (DEX-to-DEX)</div>
             </div>
             <div style="text-align: right;">
                 <span class="badge-strategy" id="mode-tag">DELTA-NEUTRAL ARB</span>
@@ -57,7 +57,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="card">
                 <div class="label">Balanç Total</div>
                 <div class="val" id="balance">-</div>
-                <div class="sub" id="balance-sub">HL: - | BN: -</div>
+                <div class="sub" id="balance-sub">HL: - | dYdX: -</div>
             </div>
             <div class="card">
                 <div class="label">PnL Net Total</div>
@@ -92,16 +92,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     <tr>
                         <th>Moneda</th>
                         <th>Preu Hyperliquid</th>
-                        <th>Preu Binance</th>
-                        <th>Spread % (HL vs BN)</th>
+                        <th id="th-venue2-px">Preu dYdX</th>
+                        <th id="th-spread-label">Spread % (HL vs dYdX)</th>
                         <th>HL Fund (8h)</th>
-                        <th>BN Fund (8h)</th>
+                        <th id="th-venue2-fund">dYdX Fund (8h)</th>
                         <th>Dif. Funding (APR)</th>
                         <th>Estat Senyal</th>
                     </tr>
                 </thead>
                 <tbody id="spreads-body">
-                    <tr><td colspan="8" style="text-align: center; color: #64748b;">Connectant amb els WebSockets de Hyperliquid i Binance...</td></tr>
+                    <tr><td colspan="8" style="text-align: center; color: #64748b;" id="loading-msg">Connectant amb els WebSockets dels exchanges...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -118,7 +118,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         <th>Moneda</th>
                         <th>Direcció</th>
                         <th>Pota Hyperliquid</th>
-                        <th>Pota Binance</th>
+                        <th id="th-leg-v2">Pota dYdX v4</th>
                         <th>Delta Net</th>
                         <th>Funding Cobrat</th>
                         <th>PnL No Realitzat</th>
@@ -171,11 +171,31 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const data = await res.json();
                 const m = data.metrics || {};
                 
+                const isDydx = (m.venue2_name || 'DYDX').toUpperCase() === 'DYDX';
+                const v2Name = isDydx ? 'dYdX v4' : 'Binance';
+                const v2Short = isDydx ? 'dYdX' : 'BN';
+
+                document.title = `Arbitratge Delta-Neutral • Hyperliquid vs ${v2Name}`;
+                const subEl = document.getElementById('header-sub');
+                if (subEl) {
+                    subEl.innerText = isDydx
+                        ? 'Hyperliquid DEX vs dYdX v4 • 100% Descentralitzat (DEX-to-DEX)'
+                        : 'Hyperliquid DEX vs Binance Futures • 0% Risc Direccional';
+                }
+                const thPx = document.getElementById('th-venue2-px');
+                if (thPx) thPx.innerText = `Preu ${v2Name}`;
+                const thSpread = document.getElementById('th-spread-label');
+                if (thSpread) thSpread.innerText = `Spread % (HL vs ${v2Short})`;
+                const thFund = document.getElementById('th-venue2-fund');
+                if (thFund) thFund.innerText = `${v2Short} Fund (8h)`;
+                const thLeg = document.getElementById('th-leg-v2');
+                if (thLeg) thLeg.innerText = `Pota ${v2Name}`;
+
                 // Mètriques principals
                 const totalBal = (typeof m.balance === 'number') ? m.balance : 10000.0;
                 document.getElementById('balance').innerText = totalBal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' $';
                 if (m.hl_balance !== undefined && m.bn_balance !== undefined) {
-                    document.getElementById('balance-sub').innerText = `HL: ${m.hl_balance.toFixed(2)}$ | BN: ${m.bn_balance.toFixed(2)}$`;
+                    document.getElementById('balance-sub').innerText = `HL: ${m.hl_balance.toFixed(2)}$ | ${v2Short}: ${m.bn_balance.toFixed(2)}$`;
                 }
 
                 const pnlEl = document.getElementById('pnl');
@@ -200,9 +220,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         const spreadColor = Math.abs(spreadVal) >= 0.180 ? 'green' : (Math.abs(spreadVal) >= 0.120 ? 'yellow' : 'white');
                         let signalTag = '<span class="tag-neutral">NORMAL</span>';
                         if (spreadVal >= 0.180) {
-                            signalTag = '<span class="tag-signal tag-buy">🔥 SELL HL / BUY BN</span>';
+                            signalTag = `<span class="tag-signal tag-buy">🔥 SELL HL / BUY ${v2Short}</span>`;
                         } else if (spreadVal <= -0.180) {
-                            signalTag = '<span class="tag-signal tag-sell">🔥 BUY HL / SELL BN</span>';
+                            signalTag = `<span class="tag-signal tag-sell">🔥 BUY HL / SELL ${v2Short}</span>`;
                         } else if (Math.abs(spreadVal) >= 0.120) {
                             signalTag = '<span class="tag-signal" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #38bdf8;">⏳ APROP (' + Math.abs(spreadVal).toFixed(3) + '%)</span>';
                         } else if (Math.abs(s.annual_funding_diff_apr || 0) >= 15.0) {

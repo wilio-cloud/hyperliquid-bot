@@ -163,15 +163,17 @@ def generate_arbitrage_dashboard(app, start_time: float) -> Group:
     metrics = app.exchange.metrics
     pnl = metrics["net_pnl"]
     pnl_color = "green" if pnl >= 0 else "red"
+    v2_label = getattr(app, "venue2_label", "dYdX v4")
+    v2_short = "dYdX" if "dydx" in v2_label.lower() else "BN"
 
     # 1. Header
     header_text = Text()
-    header_text.append(" ARBITRATGE DELTA-NEUTRAL (Hyperliquid DEX vs Binance Futures) ", style="bold white on dark_green")
+    header_text.append(f" ARBITRATGE DELTA-NEUTRAL (Hyperliquid DEX vs {v2_label}) ", style="bold white on dark_green")
     header_text.append(f"  [0% RISC DIRECCIONAL]  Temps: {time_str}\n\n", style="bold cyan")
 
     header_text.append("Balanç Total: ", style="bold")
     header_text.append(f"{metrics['balance']:,.2f}$ ", style="bold white")
-    header_text.append(f"(HL: {metrics['hl_balance']:,.2f}$ | BN: {metrics['bn_balance']:,.2f}$)   ", style="dim")
+    header_text.append(f"(HL: {metrics['hl_balance']:,.2f}$ | {v2_short}: {metrics['bn_balance']:,.2f}$)   ", style="dim")
     header_text.append("PnL Net: ", style="bold")
     header_text.append(f"{pnl:+,.3f}$   ", style=f"bold {pnl_color}")
     header_text.append("Funding Cobrat: ", style="bold")
@@ -186,13 +188,13 @@ def generate_arbitrage_dashboard(app, start_time: float) -> Group:
     header_panel = Panel(header_text, border_style="green", title="Resum Arbitratge")
 
     # 2. Taula Spreads en viu
-    spreads_table = Table(title="Spreads i Funding en Temps Real (Hyperliquid vs Binance)", expand=True)
+    spreads_table = Table(title=f"Spreads i Funding en Temps Real (Hyperliquid vs {v2_label})", expand=True)
     spreads_table.add_column("Moneda", style="bold yellow", justify="center")
     spreads_table.add_column("Preu HL ($)", justify="right")
-    spreads_table.add_column("Preu BN ($)", justify="right")
+    spreads_table.add_column(f"Preu {v2_short} ($)", justify="right")
     spreads_table.add_column("Spread %", justify="right", style="bold")
     spreads_table.add_column("HL Fund (8h)", justify="right")
-    spreads_table.add_column("BN Fund (8h)", justify="right")
+    spreads_table.add_column(f"{v2_short} Fund (8h)", justify="right")
     spreads_table.add_column("Dif. Funding APR", justify="right", style="bold")
     spreads_table.add_column("Estat Senyal", justify="center")
 
@@ -204,9 +206,9 @@ def generate_arbitrage_dashboard(app, start_time: float) -> Group:
         spread_style = "bold green" if abs(spread_val) >= 0.080 else "white"
         
         if spread_val >= 0.080:
-            sig_txt = "[bold green]🔥 SELL HL / BUY BN[/]"
+            sig_txt = f"[bold green]🔥 SELL HL / BUY {v2_short}[/]"
         elif spread_val <= -0.080:
-            sig_txt = "[bold green]🔥 BUY HL / SELL BN[/]"
+            sig_txt = f"[bold green]🔥 BUY HL / SELL {v2_short}[/]"
         elif abs(info.annual_funding_diff_apr) >= 15.0:
             sig_txt = "[bold yellow]💰 HARVEST APR[/]"
         else:
@@ -233,7 +235,7 @@ def generate_arbitrage_dashboard(app, start_time: float) -> Group:
     pos_table.add_column("Moneda", style="bold yellow")
     pos_table.add_column("Direcció", justify="center", style="bold cyan")
     pos_table.add_column("Pota Hyperliquid", justify="right")
-    pos_table.add_column("Pota Binance", justify="right")
+    pos_table.add_column(f"Pota {v2_label}", justify="right")
     pos_table.add_column("Delta", justify="center", style="bold green")
     pos_table.add_column("Funding Cobrat", justify="right", style="purple")
     pos_table.add_column("PnL No Realitzat", justify="right", style="bold")

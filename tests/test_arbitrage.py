@@ -194,9 +194,42 @@ def test_profit_guard_blocks_unprofitable_convergence():
     assert closed.realized_pnl > 0.0
     print(f"  Guany net registrat amb profit guard: {closed.realized_pnl:+.3f}$")
 
+def test_dydx_venue2_integration():
+    """Verifica el funcionament de dYdX v4 com a segon exchange descentralitzat."""
+    from core.dydx_ws_client import DydxV4WSClient
+    client = DydxV4WSClient(coins=["BTC", "ETH", "SOL"])
+    assert client.symbol_map["BTC"] == "BTC-USD"
+    assert client.symbol_map["ETH"] == "ETH-USD"
+    assert client.reverse_map["SOL-USD"] == "SOL"
+
+    exchange = ArbitragePaperExchange(
+        venue2_name="DYDX",
+        initial_hl_balance=5000.0,
+        initial_bn_balance=5000.0,
+    )
+    assert exchange.venue2_name == "DYDX"
+    assert exchange.metrics["venue2_name"] == "DYDX"
+
+    signal = ArbitrageSignal(
+        coin="ETH",
+        direction=ArbitrageDirection.SELL_HL_BUY_BN,
+        hl_price=2500.0,
+        bn_price=2495.0,
+        spread_pct=0.20,
+    )
+    pos = exchange.open_arbitrage_position(signal, size_usd=1000.0)
+    assert pos.leg_bn.venue == "DYDX"
+    assert pos.leg_hl.venue == "HYPERLIQUID"
+
+    closed = exchange.close_arbitrage_position(pos.pair_id, 2496.0, 2496.0, reason="CONVERGENCE_TARGET")
+    assert closed.leg_bn.venue == "DYDX"
+    assert exchange.metrics["venue2_name"] == "DYDX"
+    print("  Integració de dYdX v4 verificada amb èxit.")
+
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
     test_arbitrage_execution_and_pnl()
     test_funding_accrual()
     test_profit_guard_blocks_unprofitable_convergence()
+    test_dydx_venue2_integration()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")

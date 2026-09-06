@@ -19,13 +19,15 @@ class ArbitragePaperExchange:
         self,
         initial_hl_balance: float = 5000.0,
         initial_bn_balance: float = 5000.0,
+        venue2_name: str = "DYDX",
         hl_maker_fee: float = 0.00010,  # 0.010%
         hl_taker_fee: float = 0.00035,  # 0.035%
-        bn_maker_fee: float = 0.00020,  # 0.020%
-        bn_taker_fee: float = 0.00040,  # 0.040%
+        bn_maker_fee: float = 0.00020,  # 0.020% (dYdX maker)
+        bn_taker_fee: float = 0.00040,  # 0.040% (dYdX taker)
         on_open_cb: Optional[Callable[[ArbitragePosition], None]] = None,
         on_close_cb: Optional[Callable[[ArbitragePosition, str, float], None]] = None,
     ):
+        self.venue2_name = venue2_name.upper()
         self.initial_hl_balance = initial_hl_balance
         self.initial_bn_balance = initial_bn_balance
         self.initial_total_balance = initial_hl_balance + initial_bn_balance
@@ -109,7 +111,7 @@ class ArbitragePaperExchange:
                 fees_paid=hl_entry_fee,
             )
             leg_bn = ArbitrageLeg(
-                venue="BINANCE",
+                venue=self.venue2_name,
                 coin=signal.coin,
                 side=OrderSide.BUY,
                 entry_price=signal.bn_price,
@@ -132,7 +134,7 @@ class ArbitragePaperExchange:
                 fees_paid=hl_entry_fee,
             )
             leg_bn = ArbitrageLeg(
-                venue="BINANCE",
+                venue=self.venue2_name,
                 coin=signal.coin,
                 side=OrderSide.SELL,
                 entry_price=signal.bn_price,
@@ -294,6 +296,7 @@ class ArbitragePaperExchange:
         profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (99.0 if gross_profit > 0 else 1.0)
 
         return {
+            "venue2_name": self.venue2_name,
             "hl_balance": self.hl_balance_usd,
             "bn_balance": self.bn_balance_usd,
             "balance": self.total_balance_usd,
