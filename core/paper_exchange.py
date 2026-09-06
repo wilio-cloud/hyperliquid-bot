@@ -53,6 +53,17 @@ class PaperExchange:
     def get_position(self, coin: str) -> Optional[Position]:
         return self.positions.get(coin)
 
+    def has_open_orders(self, coin: str) -> bool:
+        """Indica si ja hi ha alguna ordre pendent per a aquesta moneda."""
+        return any(q.order.coin == coin for q in self.open_orders.values())
+
+    def clean_stale_orders(self, max_age_seconds: float = 30.0):
+        """Cancel·la ordres límit velles que han quedat enrere respecte al preu."""
+        now = time.time()
+        stale_ids = [oid for oid, q in self.open_orders.items() if (now - q.order.created_at) > max_age_seconds]
+        for oid in stale_ids:
+            self.cancel_order(oid)
+
     def place_order(
         self,
         coin: str,
@@ -68,6 +79,15 @@ class PaperExchange:
     ) -> Optional[Order]:
         """Envia una ordre simulada."""
         if price <= 0 or size_usd <= 0:
+            return None
+
+        # Guard: No permetre obrir si ja hi ha una posició oberta o una ordre pendent per aquesta moneda
+        if coin in self.positions:
+            logger.debug(f"[REJECTED] Ja hi ha una posició oberta per {coin}")
+            return None
+
+        if self.has_open_orders(coin):
+            logger.debug(f"[REJECTED] Ja hi ha una ordre pendent a la cua per {coin}")
             return None
 
         size_coins = size_usd / price
@@ -166,6 +186,7 @@ class PaperExchange:
 
     def on_book_update(self, book: OrderBookL2):
         """Actualitza el preu actual de les posicions i avalua Take Profit / Stop Loss."""
+        self.clean_stale_orders()
         mid = book.mid_price
         if not mid or book.coin not in self.positions:
             return
@@ -204,6 +225,10 @@ class PaperExchange:
 
     def _fill_order(self, order: Order, exec_price: float, is_maker: bool):
         """Executa l'ordre i obre la posició."""
+        if order.coin in self.positions:
+            logger.warning(f"[FILL IGNORED] Posició ja existent per {order.coin}. Fill duplicat descartat.")
+            return
+
         order.status = OrderStatus.FILLED
         order.filled_at = time.time()
         order_value = order.size * exec_price
@@ -218,18 +243,11 @@ class PaperExchange:
         else:
             self.total_taker_orders += 1
 
-        # Càlcul de Take Profit i Stop Loss
-        if order.take_profit is not None:
-            tp_price = order.take_profit
-        else:
-            tp_pct = config.default_take_profit_pct
-            tp_price = exec_price * (1.0 + tp_pct) if order.side == OrderSide.BUY else exec_price * (1.0 - tp_pct)
-
-        if order.stop_loss is not None:
-            sl_price = order.stop_loss
-        else:
-            sl_pct = config.default_stop_loss_pct
-            sl_price = exec_price * (1.0 - sl_pct) if order.side == OrderSide.BUY else exec_price * (1.0 + sl_pct)
+        # Càlcul de Take Profit i Stop Loss calibrat respecte al preu d'execució real
+        tp_pct = config.default_take_profit_pct
+        sl_pct = config.default_stop_loss_pct
+        tp_price = exec_price * (1.0 + tp_pct) if order.side == OrderSide.BUY else exec_price * (1.0 - tp_pct)
+        sl_price = exec_price * (1.0 - sl_pct) if order.side == OrderSide.BUY else exec_price * (1.0 + sl_pct)
 
         pos = Position(
             position_id=str(uuid.uuid4())[:8],
@@ -245,6 +263,9 @@ class PaperExchange:
             fees_paid=fee,
         )
         self.positions[order.coin] = pos
+
+        # Cancel·la immediatament qualsevol altra ordre pendent per a aquesta moneda
+        self.cancel_all_for_coin(order.coin)
 
         logger.info(
             f"[FILLED ENTRY] {order.coin} {order.side.value} @ {exec_price:.2f} "

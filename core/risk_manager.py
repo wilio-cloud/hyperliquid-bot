@@ -62,12 +62,22 @@ class RiskManager:
             logger.warning(f"[RISK] Pèrdua a {pos.coin}. Racha actual: {self.consecutive_losses} pèrdues consecutives.")
 
     def check_time_exits(self, positions: Dict[str, Position], order_books: Dict[str, OrderBookL2]) -> list[str]:
-        """Detecta posicions que han superat el temps màxim permès per a scalping."""
+        """Detecta posicions que han superat el temps màxim permès per a scalping sense matar trades prematurament."""
         to_close = []
         now = time.time()
         for coin, pos in positions.items():
             duration = now - pos.entry_time
-            if duration > self.max_holding_time_seconds:
-                logger.info(f"[RISK TIME EXIT] {coin} ha superat {self.max_holding_time_seconds}s de durada ({duration:.1f}s). Tancant.")
+            # Gestió intel·ligent del temps:
+            # 1. Si supera 15 minuts (900s), forcem tancament de seguretat
+            if duration >= 900.0:
+                logger.info(f"[RISK TIME EXIT] {coin} ha superat 15m ({duration:.1f}s). Tancant.")
                 to_close.append(coin)
+            # 2. Si dura més de 5 minuts (300s), només tanquem si ja cobreix comissions amb guany net (+0.25$) o pèrdua creixent (<-0.80$)
+            elif duration >= 300.0:
+                if pos.unrealized_pnl >= 0.25:
+                    logger.info(f"[RISK TIME PROFIT EXIT] {coin} tancant amb guany net ({pos.unrealized_pnl:+.3f}$) als {duration:.1f}s.")
+                    to_close.append(coin)
+                elif pos.unrealized_pnl <= -0.80:
+                    logger.info(f"[RISK TIME DEFENSE EXIT] {coin} tancant per pèrdua ({pos.unrealized_pnl:+.3f}$) als {duration:.1f}s.")
+                    to_close.append(coin)
         return to_close

@@ -102,7 +102,7 @@ class TradingBotApp:
                 self._process_signal(sig, self.books[trade.coin])
 
     def _process_signal(self, sig: Signal, book: OrderBookL2):
-        has_pos = self.exchange.get_position(sig.coin) is not None
+        has_pos = (self.exchange.get_position(sig.coin) is not None) or self.exchange.has_open_orders(sig.coin)
         can_open, reason = self.risk_manager.can_open_position(
             coin=sig.coin,
             current_balance=self.exchange.balance_usd,
