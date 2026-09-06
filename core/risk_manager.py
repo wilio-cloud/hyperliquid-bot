@@ -13,7 +13,7 @@ class RiskManager:
         self.cooldown_until: Dict[str, float] = {}  # coin -> timestamp
         self.consecutive_losses: int = 0
         self.daily_start_time = time.time()
-        self.max_holding_time_seconds = 180.0  # 3 minuts màxim per operació de scalping
+        self.max_holding_time_seconds = 300.0  # 5 minuts màxim per operació de scalping
 
     def can_open_position(
         self,

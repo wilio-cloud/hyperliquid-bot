@@ -58,7 +58,7 @@ class OrderBookImbalanceStrategy(BaseStrategy):
                 strategy_name=self.name,
                 reason=f"OBI Bullish Ratio: {ratio_bid_ask:.2f}x (Bid: {bid_vol_usd:,.0f}$ vs Ask: {ask_vol_usd:,.0f}$)",
                 take_profit=book.best_bid * (1.0 + 0.0008),
-                stop_loss=book.best_bid * (1.0 - 0.0010),
+                stop_loss=book.best_bid * (1.0 - 0.0018),
             )
             self.record_signal(sig)
             return sig
@@ -73,7 +73,7 @@ class OrderBookImbalanceStrategy(BaseStrategy):
                 strategy_name=self.name,
                 reason=f"OBI Bearish Ratio: {ratio_ask_bid:.2f}x (Ask: {ask_vol_usd:,.0f}$ vs Bid: {bid_vol_usd:,.0f}$)",
                 take_profit=book.best_ask * (1.0 - 0.0008),
-                stop_loss=book.best_ask * (1.0 + 0.0010),
+                stop_loss=book.best_ask * (1.0 + 0.0018),
             )
             self.record_signal(sig)
             return sig

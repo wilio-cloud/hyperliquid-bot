@@ -52,9 +52,9 @@ class SpreadMarketMakerStrategy(BaseStrategy):
         if now - self.last_quote_time.get(coin, 0) < 3.0:
             return None
 
-        # Target mínim del +0.045% per superar folgadament el 0.020% de comissió roundtrip
-        min_tp_pct = 0.00045
-        min_sl_pct = 0.00060
+        # Target de TP del +0.065% (supera de sobres la comissió) i SL del -0.180% (marge contra el soroll)
+        min_tp_pct = 0.00065
+        min_sl_pct = 0.00180
 
         # 1. Si el bid té un suport lleugerament superior: comprem al Bid per sortir per sobre
         if 1.05 <= imbalance <= 2.2:
