@@ -52,37 +52,41 @@ class SpreadMarketMakerStrategy(BaseStrategy):
         if now - self.last_quote_time.get(coin, 0) < 3.0:
             return None
 
-        # 1. Si el bid té un suport lleugerament superior: comprem al Bid per sortir a l'Ask
+        # Target mínim del +0.045% per superar folgadament el 0.020% de comissió roundtrip
+        min_tp_pct = 0.00045
+        min_sl_pct = 0.00060
+
+        # 1. Si el bid té un suport lleugerament superior: comprem al Bid per sortir per sobre
         if 1.05 <= imbalance <= 2.2:
             self.last_quote_time[coin] = now
-            tp_target = book.best_ask
-            sl_target = book.best_bid * (1.0 - 0.0010)
+            tp_target = max(book.best_ask, book.best_bid * (1.0 + min_tp_pct))
+            sl_target = book.best_bid * (1.0 - min_sl_pct)
 
             sig = Signal(
                 coin=coin,
                 action="BUY",
                 price=book.best_bid,
                 strategy_name=self.name,
-                reason=f"Spread Capture: Bid {book.best_bid:.2f} -> Ask {book.best_ask:.2f} (Spread: {spread_pct:.3f}%)",
+                reason=f"Spread Scalp BUY: Bid {book.best_bid:.2f} -> TP {tp_target:.2f}",
                 take_profit=tp_target,
                 stop_loss=sl_target,
             )
             self.record_signal(sig)
             return sig
 
-        # 2. Si l'ask té un suport lleugerament superior: venem a l'Ask per comprar al Bid (Shorting spread)
+        # 2. Si l'ask té un suport lleugerament superior: venem a l'Ask per sortir per sota
         ask_bid_ratio = top_ask_vol / top_bid_vol
         if 1.05 <= ask_bid_ratio <= 2.2:
             self.last_quote_time[coin] = now
-            tp_target = book.best_bid
-            sl_target = book.best_ask * (1.0 + 0.0010)
+            tp_target = min(book.best_bid, book.best_ask * (1.0 - min_tp_pct))
+            sl_target = book.best_ask * (1.0 + min_sl_pct)
 
             sig = Signal(
                 coin=coin,
                 action="SELL",
                 price=book.best_ask,
                 strategy_name=self.name,
-                reason=f"Spread Capture: Ask {book.best_ask:.2f} -> Bid {book.best_bid:.2f} (Spread: {spread_pct:.3f}%)",
+                reason=f"Spread Scalp SELL: Ask {book.best_ask:.2f} -> TP {tp_target:.2f}",
                 take_profit=tp_target,
                 stop_loss=sl_target,
             )
