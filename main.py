@@ -124,6 +124,8 @@ class TradingBotApp:
             post_only=True,
             strategy_name=sig.strategy_name,
             current_book=book,
+            take_profit=sig.take_profit,
+            stop_loss=sig.stop_loss,
         )
 
         if order and self.headless:

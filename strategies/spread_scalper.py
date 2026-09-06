@@ -52,12 +52,11 @@ class SpreadMarketMakerStrategy(BaseStrategy):
         if now - self.last_quote_time.get(coin, 0) < 3.0:
             return None
 
-        # Si el bid té un suport lleugerament superior (1.1x a 2.0x), comprem al bid per vendre a l'ask
+        # 1. Si el bid té un suport lleugerament superior: comprem al Bid per sortir a l'Ask
         if 1.05 <= imbalance <= 2.2:
             self.last_quote_time[coin] = now
-            # Take profit és el Best Ask exacte (captura d'spread pur!)
             tp_target = book.best_ask
-            sl_target = book.best_bid * (1.0 - 0.0010)  # Stop loss molt estret
+            sl_target = book.best_bid * (1.0 - 0.0010)
 
             sig = Signal(
                 coin=coin,
@@ -65,6 +64,25 @@ class SpreadMarketMakerStrategy(BaseStrategy):
                 price=book.best_bid,
                 strategy_name=self.name,
                 reason=f"Spread Capture: Bid {book.best_bid:.2f} -> Ask {book.best_ask:.2f} (Spread: {spread_pct:.3f}%)",
+                take_profit=tp_target,
+                stop_loss=sl_target,
+            )
+            self.record_signal(sig)
+            return sig
+
+        # 2. Si l'ask té un suport lleugerament superior: venem a l'Ask per comprar al Bid (Shorting spread)
+        ask_bid_ratio = top_ask_vol / top_bid_vol
+        if 1.05 <= ask_bid_ratio <= 2.2:
+            self.last_quote_time[coin] = now
+            tp_target = book.best_bid
+            sl_target = book.best_ask * (1.0 + 0.0010)
+
+            sig = Signal(
+                coin=coin,
+                action="SELL",
+                price=book.best_ask,
+                strategy_name=self.name,
+                reason=f"Spread Capture: Ask {book.best_ask:.2f} -> Bid {book.best_bid:.2f} (Spread: {spread_pct:.3f}%)",
                 take_profit=tp_target,
                 stop_loss=sl_target,
             )

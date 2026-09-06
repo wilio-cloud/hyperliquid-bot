@@ -88,6 +88,8 @@ class Order(BaseModel):
     filled_at: Optional[float] = None
     fee_paid: float = 0.0
     strategy_name: str = ""
+    take_profit: Optional[float] = None
+    stop_loss: Optional[float] = None
 
 class Position(BaseModel):
     position_id: str

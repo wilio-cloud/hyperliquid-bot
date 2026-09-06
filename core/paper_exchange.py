@@ -63,6 +63,8 @@ class PaperExchange:
         post_only: bool = True,
         strategy_name: str = "",
         current_book: Optional[OrderBookL2] = None,
+        take_profit: Optional[float] = None,
+        stop_loss: Optional[float] = None,
     ) -> Optional[Order]:
         """Envia una ordre simulada."""
         if price <= 0 or size_usd <= 0:
@@ -81,6 +83,8 @@ class PaperExchange:
             status=OrderStatus.OPEN,
             created_at=time.time(),
             strategy_name=strategy_name,
+            take_profit=take_profit,
+            stop_loss=stop_loss,
         )
 
         if order_type == OrderType.LIMIT:
@@ -215,15 +219,17 @@ class PaperExchange:
             self.total_taker_orders += 1
 
         # Càlcul de Take Profit i Stop Loss
-        tp_pct = config.default_take_profit_pct
-        sl_pct = config.default_stop_loss_pct
-
-        if order.side == OrderSide.BUY:
-            tp_price = exec_price * (1.0 + tp_pct)
-            sl_price = exec_price * (1.0 - sl_pct)
+        if order.take_profit is not None:
+            tp_price = order.take_profit
         else:
-            tp_price = exec_price * (1.0 - tp_pct)
-            sl_price = exec_price * (1.0 + sl_pct)
+            tp_pct = config.default_take_profit_pct
+            tp_price = exec_price * (1.0 + tp_pct) if order.side == OrderSide.BUY else exec_price * (1.0 - tp_pct)
+
+        if order.stop_loss is not None:
+            sl_price = order.stop_loss
+        else:
+            sl_pct = config.default_stop_loss_pct
+            sl_price = exec_price * (1.0 - sl_pct) if order.side == OrderSide.BUY else exec_price * (1.0 + sl_pct)
 
         pos = Position(
             position_id=str(uuid.uuid4())[:8],
