@@ -17,15 +17,15 @@ logger = logging.getLogger("CrossArbitrage")
 class CrossExchangeArbitrageStrategy:
     def __init__(
         self,
-        min_entry_spread_pct: float = 0.080,  # Dislocació mínima per obrir (+0.080%)
-        target_exit_spread_pct: float = 0.015,  # Convergència de sortida (<= +0.015%)
-        stop_loss_spread_pct: float = 0.35,     # Stop per divergència anòmala (>= 0.35%)
-        max_hold_seconds: int = 14400,          # 4 hores màxim per posició
+        min_entry_spread_pct: float = 0.140,   # Dislocació mínima d'entrada (+0.140% per cobrir comissions)
+        target_exit_spread_pct: float = 0.020, # Convergència de sortida (<= +0.020%)
+        max_divergence_pct: float = 0.40,      # Stop de divergència (+0.40% addicional respecte l'entrada)
+        max_hold_seconds: int = 14400,         # 4 hores màxim per posició
     ):
         self.name = "CROSS_ARBITRAGE"
         self.min_entry_spread_pct = min_entry_spread_pct
         self.target_exit_spread_pct = target_exit_spread_pct
-        self.stop_loss_spread_pct = stop_loss_spread_pct
+        self.max_divergence_pct = max_divergence_pct
         self.max_hold_seconds = max_hold_seconds
 
         self.hl_books: Dict[str, OrderBookL2] = {}
@@ -160,8 +160,8 @@ class CrossExchangeArbitrageStrategy:
             if current_spread_to_close <= self.target_exit_spread_pct:
                 return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
 
-            # Stop loss per divergència crítica
-            if current_spread_to_close >= self.stop_loss_spread_pct:
+            # Stop loss només si el spread divergeix un marge addicional per sobre de l'entrada
+            if current_spread_to_close >= (pos.entry_spread_pct + self.max_divergence_pct):
                 return ("STOP_LOSS_DIVERGENCE", hl_exit_px, bn_exit_px)
 
         else:  # BUY_HL_SELL_BN
@@ -175,10 +175,10 @@ class CrossExchangeArbitrageStrategy:
             if current_spread_to_close <= self.target_exit_spread_pct:
                 return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
 
-            if current_spread_to_close >= self.stop_loss_spread_pct:
+            if current_spread_to_close >= (pos.entry_spread_pct + self.max_divergence_pct):
                 return ("STOP_LOSS_DIVERGENCE", hl_exit_px, bn_exit_px)
 
-        # Límit de temps de seguretat
+        # Límit de temps de seguretat (4 hores)
         if (time.time() - pos.entry_time) >= self.max_hold_seconds:
             return ("TIME_LIMIT", hl_exit_px, bn_exit_px)
 

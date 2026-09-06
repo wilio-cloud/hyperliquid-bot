@@ -157,57 +157,67 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <script>
+        const fmtNum = (n, d = 2) => (typeof n === 'number' && !isNaN(n)) ? n.toFixed(d) : '0.00';
+        const fmtPx = (p) => (typeof p === 'number' && !isNaN(p)) ? p.toFixed(p < 1.0 ? 4 : 2) : '-';
+        const fmtPct = (p) => (typeof p === 'number' && !isNaN(p)) ? (p >= 0 ? '+' : '') + p.toFixed(3) + '%' : '-';
+
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
+                if (!res.ok) {
+                    document.getElementById('uptime').innerText = 'Servidor reiniciant (' + res.status + ')...';
+                    return;
+                }
                 const data = await res.json();
+                const m = data.metrics || {};
                 
                 // Mètriques principals
-                const totalBal = (data.metrics.balance || 0);
+                const totalBal = (typeof m.balance === 'number') ? m.balance : 10000.0;
                 document.getElementById('balance').innerText = totalBal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' $';
-                if (data.metrics.hl_balance !== undefined && data.metrics.bn_balance !== undefined) {
-                    document.getElementById('balance-sub').innerText = `HL: ${data.metrics.hl_balance.toFixed(2)}$ | BN: ${data.metrics.bn_balance.toFixed(2)}$`;
+                if (m.hl_balance !== undefined && m.bn_balance !== undefined) {
+                    document.getElementById('balance-sub').innerText = `HL: ${m.hl_balance.toFixed(2)}$ | BN: ${m.bn_balance.toFixed(2)}$`;
                 }
 
                 const pnlEl = document.getElementById('pnl');
-                const pnl = (data.metrics.net_pnl || 0);
+                const pnl = (typeof m.net_pnl === 'number') ? m.net_pnl : 0.0;
                 pnlEl.innerText = (pnl >= 0 ? '+' : '') + pnl.toFixed(3) + ' $';
                 pnlEl.className = 'val ' + (pnl >= 0 ? 'green' : 'red');
-                document.getElementById('pnl-sub').innerText = `Realitzat: ${(data.metrics.realized_pnl >= 0 ? '+' : '') + (data.metrics.realized_pnl || 0).toFixed(3)}$`;
+                document.getElementById('pnl-sub').innerText = `Realitzat: ${(m.realized_pnl >= 0 ? '+' : '') + fmtNum(m.realized_pnl, 3)}$`;
 
-                const funding = (data.metrics.total_funding || 0);
+                const funding = (typeof m.total_funding === 'number') ? m.total_funding : 0.0;
                 document.getElementById('funding').innerText = (funding >= 0 ? '+' : '') + funding.toFixed(4) + ' $';
 
-                document.getElementById('trades').innerText = `${data.metrics.total_trades || 0} (${data.metrics.wins || 0}W / ${data.metrics.losses || 0}L)`;
-                document.getElementById('winrate-sub').innerText = `Winrate: ${(data.metrics.winrate_pct || 0).toFixed(1)}%`;
-                document.getElementById('fees').innerText = (data.metrics.total_fees || 0).toFixed(4) + ' $';
+                document.getElementById('trades').innerText = `${m.total_trades || 0} (${m.wins || 0}W / ${m.losses || 0}L)`;
+                document.getElementById('winrate-sub').innerText = `Winrate: ${fmtNum(m.winrate_pct, 1)}%`;
+                document.getElementById('fees').innerText = fmtNum(m.total_fees, 4) + ' $';
                 document.getElementById('uptime').innerText = 'Temps actiu: ' + (data.uptime || '-');
 
                 // Taula Spreads
                 const spreadsBody = document.getElementById('spreads-body');
                 if (data.spreads && data.spreads.length > 0) {
                     spreadsBody.innerHTML = data.spreads.map(s => {
-                        const spreadVal = s.spread_pct;
-                        const spreadColor = Math.abs(spreadVal) >= 0.080 ? 'green' : 'white';
+                        const spreadVal = s.spread_pct || 0.0;
+                        const spreadColor = Math.abs(spreadVal) >= 0.140 ? 'green' : 'white';
                         let signalTag = '<span class="tag-neutral">NORMAL</span>';
-                        if (spreadVal >= 0.080) {
+                        if (spreadVal >= 0.140) {
                             signalTag = '<span class="tag-signal tag-buy">🔥 SELL HL / BUY BN</span>';
-                        } else if (spreadVal <= -0.080) {
+                        } else if (spreadVal <= -0.140) {
                             signalTag = '<span class="tag-signal tag-sell">🔥 BUY HL / SELL BN</span>';
-                        } else if (Math.abs(s.annual_funding_diff_apr) >= 15.0) {
+                        } else if (Math.abs(s.annual_funding_diff_apr || 0) >= 15.0) {
                             signalTag = '<span class="tag-signal" style="background: rgba(250, 204, 21, 0.15); color: #facc15; border: 1px solid #facc15;">💰 HARVEST APR</span>';
                         }
 
-                        const aprColor = s.annual_funding_diff_apr > 10.0 ? 'green' : (s.annual_funding_diff_apr < -10.0 ? 'red' : '');
+                        const apr = s.annual_funding_diff_apr || 0;
+                        const aprColor = apr > 10.0 ? 'green' : (apr < -10.0 ? 'red' : '');
 
                         return `<tr>
                             <td style="font-weight: bold; color: #facc15;">${s.coin}</td>
-                            <td>${s.hl_price.toFixed(s.hl_price < 1.0 ? 4 : 2)} $</td>
-                            <td>${s.bn_price.toFixed(s.bn_price < 1.0 ? 4 : 2)} $</td>
+                            <td>${fmtPx(s.hl_price)} $</td>
+                            <td>${fmtPx(s.bn_price)} $</td>
                             <td class="${spreadColor}" style="font-weight: bold;">${(spreadVal >= 0 ? '+' : '') + spreadVal.toFixed(4)}%</td>
-                            <td>${(s.hl_funding_8h >= 0 ? '+' : '') + s.hl_funding_8h.toFixed(4)}%</td>
-                            <td>${(s.bn_funding_8h >= 0 ? '+' : '') + s.bn_funding_8h.toFixed(4)}%</td>
-                            <td class="${aprColor}" style="font-weight: bold;">${(s.annual_funding_diff_apr >= 0 ? '+' : '') + s.annual_funding_diff_apr.toFixed(1)}%</td>
+                            <td>${(s.hl_funding_8h >= 0 ? '+' : '') + fmtNum(s.hl_funding_8h, 4)}%</td>
+                            <td>${(s.bn_funding_8h >= 0 ? '+' : '') + fmtNum(s.bn_funding_8h, 4)}%</td>
+                            <td class="${aprColor}" style="font-weight: bold;">${(apr >= 0 ? '+' : '') + apr.toFixed(1)}%</td>
                             <td>${signalTag}</td>
                         </tr>`;
                     }).join('');
@@ -219,15 +229,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 if (data.positions && data.positions.length > 0) {
                     posCount.innerText = `${data.positions.length} posició(ns)`;
                     posBody.innerHTML = data.positions.map(p => {
-                        const pnlColor = p.unrealized_pnl >= 0 ? 'green' : 'red';
+                        const pnlVal = p.unrealized_pnl || 0.0;
+                        const pnlColor = pnlVal >= 0 ? 'green' : 'red';
+                        const hlSide = (p.leg_hl && p.leg_hl.side) ? p.leg_hl.side : '-';
+                        const hlPx = (p.leg_hl && p.leg_hl.entry_price) ? p.leg_hl.entry_price.toFixed(2) : '-';
+                        const hlSz = (p.leg_hl && p.leg_hl.size_usd) ? p.leg_hl.size_usd.toFixed(0) : '-';
+                        const bnSide = (p.leg_bn && p.leg_bn.side) ? p.leg_bn.side : '-';
+                        const bnPx = (p.leg_bn && p.leg_bn.entry_price) ? p.leg_bn.entry_price.toFixed(2) : '-';
+                        const bnSz = (p.leg_bn && p.leg_bn.size_usd) ? p.leg_bn.size_usd.toFixed(0) : '-';
+
                         return `<tr>
                             <td style="font-weight: bold; color: #facc15;">${p.coin}</td>
                             <td style="font-weight: bold; color: #38bdf8;">${p.direction}</td>
-                            <td>${p.leg_hl.side} @ ${p.leg_hl.entry_price.toFixed(2)} (${p.leg_hl.size_usd.toFixed(0)}$)</td>
-                            <td>${p.leg_bn.side} @ ${p.leg_bn.entry_price.toFixed(2)} (${p.leg_bn.size_usd.toFixed(0)}$)</td>
+                            <td>${hlSide} @ ${hlPx} (${hlSz}$)</td>
+                            <td>${bnSide} @ ${bnPx} (${bnSz}$)</td>
                             <td style="color: #10b981; font-weight: bold;">0.00 (Neutral)</td>
-                            <td style="color: #c084fc;">${(p.accumulated_funding >= 0 ? '+' : '') + p.accumulated_funding.toFixed(4)}$</td>
-                            <td class="${pnlColor}" style="font-weight: bold;">${(p.unrealized_pnl >= 0 ? '+' : '') + p.unrealized_pnl.toFixed(3)}$</td>
+                            <td style="color: #c084fc;">${((p.accumulated_funding || 0) >= 0 ? '+' : '') + fmtNum(p.accumulated_funding, 4)}$</td>
+                            <td class="${pnlColor}" style="font-weight: bold;">${(pnlVal >= 0 ? '+' : '') + pnlVal.toFixed(3)}$</td>
                         </tr>`;
                     }).join('');
                 } else {
@@ -239,21 +257,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const closedBody = document.getElementById('closed-body');
                 if (data.recent_closed && data.recent_closed.length > 0) {
                     closedBody.innerHTML = data.recent_closed.slice().reverse().map(p => {
-                        const pnlColor = p.realized_pnl >= 0 ? 'green' : 'red';
+                        const pnlVal = p.realized_pnl || 0.0;
+                        const pnlColor = pnlVal >= 0 ? 'green' : 'red';
                         const reasonColor = p.exit_reason === 'CONVERGENCE_TARGET' ? 'green' : 'yellow';
                         return `<tr>
                             <td style="font-weight: bold; color: #facc15;">${p.coin}</td>
                             <td style="color: #38bdf8;">${p.direction}</td>
                             <td class="${reasonColor}" style="font-weight: bold;">${p.exit_reason}</td>
                             <td>${p.entry_spread_pct ? p.entry_spread_pct.toFixed(3) + '%' : '-'}</td>
-                            <td style="color: #c084fc;">${(p.accumulated_funding >= 0 ? '+' : '') + (p.accumulated_funding || 0).toFixed(4)}$</td>
-                            <td>${(p.total_fees || 0).toFixed(4)}$</td>
-                            <td class="${pnlColor}" style="font-weight: bold;">${(p.realized_pnl >= 0 ? '+' : '') + p.realized_pnl.toFixed(3)}$</td>
+                            <td style="color: #c084fc;">${((p.accumulated_funding || 0) >= 0 ? '+' : '') + fmtNum(p.accumulated_funding, 4)}$</td>
+                            <td>${fmtNum(p.total_fees, 4)}$</td>
+                            <td class="${pnlColor}" style="font-weight: bold;">${(pnlVal >= 0 ? '+' : '') + pnlVal.toFixed(3)}$</td>
                         </tr>`;
                     }).join('');
                 }
             } catch (e) {
                 console.error("Error actualitzant dashboard:", e);
+                document.getElementById('uptime').innerText = 'Connexió en curs (reintentant)...';
             }
         }
         setInterval(fetchStatus, 1500);

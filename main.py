@@ -79,6 +79,7 @@ class ArbitrageTradingBotApp:
             start_time=self.start_time,
             app_ref=self,
         )
+        self.coin_cooldowns: Dict[str, float] = {}
         self.is_running = False
         self._sync_task: Optional[asyncio.Task] = None
         self._funding_accrual_task: Optional[asyncio.Task] = None
@@ -93,13 +94,15 @@ class ArbitrageTradingBotApp:
             )
 
     def _on_pair_close(self, pos: ArbitragePosition, exit_reason: str, net_pnl: float):
+        # Pausa de seguretat de 3 minuts per evitar bucles d'alta freqüència
+        self.coin_cooldowns[pos.coin] = time.time() + 180.0
         if self.headless:
             icon = "✅" if net_pnl > 0 else "❌"
             res_str = "GUANY" if net_pnl > 0 else "PÈRDUA"
             print(
                 f"  {icon} [ARB TANCAT {exit_reason}] {pos.coin} | {res_str}: {net_pnl:+.3f}$ | "
                 f"Funding: {pos.accumulated_funding:+.4f}$ | Comissions: {pos.total_fees:.4f}$ | "
-                f"Balanç Total: {self.exchange.total_balance_usd:.2f}$"
+                f"Balanç Total: {self.exchange.total_balance_usd:.2f}$ (Cooldown 3m)"
             )
 
     def handle_hl_book(self, book: OrderBookL2):
@@ -130,7 +133,11 @@ class ArbitrageTradingBotApp:
                         is_maker=False,
                     )
 
-        # 2. Avalua noves oportunitats d'entrada si no tenim posició en aquest parell
+        # 2. Comprova cooldown de seguretat
+        if time.time() < self.coin_cooldowns.get(coin, 0.0):
+            return
+
+        # 3. Avalua noves oportunitats d'entrada si no tenim posició en aquest parell
         if not self.exchange.has_open_position(coin) and len(self.exchange.active_positions) < 3:
             sig = self.strategy.evaluate_entry(coin)
             if sig:
@@ -398,8 +405,8 @@ def main():
     parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + Binance)")
     parser.add_argument("--mode", choices=["arbitrage", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (recomanat) o 'scalper'")
     parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL LINK NEAR SUI DOGE)")
-    parser.add_argument("--min-spread", type=float, default=0.080, help="Spread mínim percentual d'entrada per a l'arbitratge (default: 0.080%%)")
-    parser.add_argument("--exit-spread", type=float, default=0.015, help="Spread màxim percentual de sortida/convergència (default: 0.015%%)")
+    parser.add_argument("--min-spread", type=float, default=0.140, help="Spread mínim percentual d'entrada per a l'arbitratge (default: 0.140%%)")
+    parser.add_argument("--exit-spread", type=float, default=0.020, help="Spread màxim percentual de sortida/convergència (default: 0.020%%)")
     parser.add_argument("--size", type=float, default=1000.0, help="Mida en dòlars per ordre/pota")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
