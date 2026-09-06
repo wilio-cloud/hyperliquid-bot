@@ -17,9 +17,10 @@ logger = logging.getLogger("ArbitrageExchange")
 class ArbitragePaperExchange:
     def __init__(
         self,
-        initial_hl_balance: float = 5000.0,
-        initial_bn_balance: float = 5000.0,
+        initial_hl_balance: float = 500.0,
+        initial_bn_balance: float = 500.0,
         venue2_name: str = "DYDX",
+        leverage: float = 2.0,
         hl_maker_fee: float = 0.00010,  # 0.010%
         hl_taker_fee: float = 0.00035,  # 0.035%
         bn_maker_fee: float = 0.00020,  # 0.020% (dYdX maker)
@@ -28,6 +29,7 @@ class ArbitragePaperExchange:
         on_close_cb: Optional[Callable[[ArbitragePosition, str, float], None]] = None,
     ):
         self.venue2_name = venue2_name.upper()
+        self.leverage = leverage
         self.initial_hl_balance = initial_hl_balance
         self.initial_bn_balance = initial_bn_balance
         self.initial_total_balance = initial_hl_balance + initial_bn_balance
@@ -75,13 +77,13 @@ class ArbitragePaperExchange:
             logger.debug(f"Ja hi ha una posició oberta per {signal.coin}. Omissió.")
             return None
 
-        # Comprovació de capital disponible
-        required_margin_per_leg = size_usd  # 1x leverage o cobertura completa
-        if self.hl_balance_usd < required_margin_per_leg * 0.2:  # requereix mínim 20% de marge lliure
+        # Comprovació de capital disponible segons apalancament
+        required_margin_per_leg = size_usd / self.leverage
+        if self.hl_balance_usd < required_margin_per_leg:
             logger.warning("Saldo insuficient a Hyperliquid per cobrir la posició d'arbitratge.")
             return None
-        if self.bn_balance_usd < required_margin_per_leg * 0.2:
-            logger.warning("Saldo insuficient a Binance per cobrir la posició d'arbitratge.")
+        if self.bn_balance_usd < required_margin_per_leg:
+            logger.warning(f"Saldo insuficient a {self.venue2_name} per cobrir la posició d'arbitratge.")
             return None
 
         pair_id = f"arb_{signal.coin}_{int(time.time() * 1000)}"
@@ -297,6 +299,8 @@ class ArbitragePaperExchange:
 
         return {
             "venue2_name": self.venue2_name,
+            "leverage": self.leverage,
+            "leverage_str": f"{self.leverage:g}x",
             "hl_balance": self.hl_balance_usd,
             "bn_balance": self.bn_balance_usd,
             "balance": self.total_balance_usd,

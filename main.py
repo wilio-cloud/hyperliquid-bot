@@ -50,10 +50,12 @@ class ArbitrageTradingBotApp:
         venue2: str = "dydx",
         min_spread: float = 0.180,
         exit_spread: float = 0.010,
-        size_usd: float = 1000.0,
+        size_usd: float = 300.0,
         headless: bool = False,
-        max_positions: int = 4,
+        max_positions: int = 3,
         max_book_spread: float = 0.120,
+        initial_balance: float = 1000.0,
+        leverage: float = 2.0,
     ):
         self.coins = coins
         self.venue2 = venue2.lower()
@@ -61,12 +63,17 @@ class ArbitrageTradingBotApp:
         self.size_usd = size_usd
         self.headless = headless
         self.max_positions = max_positions
+        self.leverage = leverage
         self.start_time = time.time()
 
+        initial_hl = initial_balance / 2.0
+        initial_bn = initial_balance / 2.0
+
         self.exchange = ArbitragePaperExchange(
-            initial_hl_balance=5000.0,
-            initial_bn_balance=5000.0,
+            initial_hl_balance=initial_hl,
+            initial_bn_balance=initial_bn,
             venue2_name=self.venue2,
+            leverage=self.leverage,
             on_open_cb=self._on_pair_open,
             on_close_cb=self._on_pair_close,
         )
@@ -425,18 +432,24 @@ class DirectionalScalperApp:
 def main():
     min_spread_default = float(os.environ.get("MIN_SPREAD", "0.180"))
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
-    max_positions_default = int(os.environ.get("MAX_POSITIONS", "4"))
+    max_positions_default = int(os.environ.get("MAX_POSITIONS", "3"))
     max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.120"))
     venue2_default = os.environ.get("VENUE2", "dydx").lower()
+    initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
+    leverage_default = float(os.environ.get("LEVERAGE", "2.0"))
+    size_default = float(os.environ.get("SIZE", "300.0"))
+
     parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + dYdX / Binance)")
     parser.add_argument("--mode", choices=["arbitrage", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (recomanat) o 'scalper'")
     parser.add_argument("--venue2", choices=["dydx", "binance"], default=venue2_default, help="Segon exchange per a l'arbitratge: 'dydx' (100%% DEX descentralitzat, legal a la UE/Espanya) o 'binance'")
     parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL)")
+    parser.add_argument("--initial-balance", type=float, default=initial_balance_default, help="Capital inicial total en dòlars (default: 1000.0$)")
+    parser.add_argument("--leverage", type=float, default=leverage_default, help="Apalancament conservador per a l'arbitratge (default: 2.0x)")
+    parser.add_argument("--size", type=float, default=size_default, help="Mida en dòlars per ordre/pota (default: 300.0$)")
     parser.add_argument("--min-spread", type=float, default=min_spread_default, help="Spread mínim percentual d'entrada per a l'arbitratge (default: 0.180%%)")
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
-    parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 4)")
+    parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 3)")
     parser.add_argument("--max-book-spread", type=float, default=max_book_spread_default, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.120%%)")
-    parser.add_argument("--size", type=float, default=1000.0, help="Mida en dòlars per ordre/pota")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
     parser.add_argument("--no-burst", action="store_true", help="Desactivar Volume Burst (només scalper)")
@@ -444,8 +457,6 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "arbitrage":
-        # Per a dYdX prioritzem les monedes d'alta liquiditat institucional (BTC, ETH, SOL)
-        # Per a Binance s'inclouen també les altcoins gràcies a la seva alta densitat de market makers
         default_coins = ["BTC", "ETH", "SOL"] if args.venue2 == "dydx" else ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
         coins = args.coins or default_coins
         app = ArbitrageTradingBotApp(
@@ -457,6 +468,8 @@ def main():
             headless=args.headless,
             max_positions=args.max_positions,
             max_book_spread=args.max_book_spread,
+            initial_balance=args.initial_balance,
+            leverage=args.leverage,
         )
     else:
         coins = args.coins or ["BTC"]

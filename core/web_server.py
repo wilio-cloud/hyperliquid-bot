@@ -48,7 +48,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="header-sub">Hyperliquid DEX vs dYdX v4 • 100% Descentralitzat (DEX-to-DEX)</div>
             </div>
             <div style="text-align: right;">
-                <span class="badge-strategy" id="mode-tag">DELTA-NEUTRAL ARB</span>
+                <span class="badge-strategy" id="mode-tag">DELTA-NEUTRAL ARB (2x)</span>
                 <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="uptime">Carregant...</div>
             </div>
         </header>
@@ -191,8 +191,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const thLeg = document.getElementById('th-leg-v2');
                 if (thLeg) thLeg.innerText = `Pota ${v2Name}`;
 
+                const tagEl = document.getElementById('mode-tag');
+                if (tagEl) tagEl.innerText = `DELTA-NEUTRAL ARB (${m.leverage_str || '2x'})`;
+
                 // Mètriques principals
-                const totalBal = (typeof m.balance === 'number') ? m.balance : 10000.0;
+                const totalBal = (typeof m.balance === 'number') ? m.balance : 1000.0;
                 document.getElementById('balance').innerText = totalBal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' $';
                 if (m.hl_balance !== undefined && m.bn_balance !== undefined) {
                     document.getElementById('balance-sub').innerText = `HL: ${m.hl_balance.toFixed(2)}$ | ${v2Short}: ${m.bn_balance.toFixed(2)}$`;

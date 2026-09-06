@@ -168,7 +168,8 @@ def generate_arbitrage_dashboard(app, start_time: float) -> Group:
 
     # 1. Header
     header_text = Text()
-    header_text.append(f" ARBITRATGE DELTA-NEUTRAL (Hyperliquid DEX vs {v2_label}) ", style="bold white on dark_green")
+    lev_badge = f" [{metrics.get('leverage_str', '2x')}]"
+    header_text.append(f" ARBITRATGE DELTA-NEUTRAL (Hyperliquid DEX vs {v2_label}){lev_badge} ", style="bold white on dark_green")
     header_text.append(f"  [0% RISC DIRECCIONAL]  Temps: {time_str}\n\n", style="bold cyan")
 
     header_text.append("Balanç Total: ", style="bold")
