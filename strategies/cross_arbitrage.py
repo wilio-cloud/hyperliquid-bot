@@ -18,13 +18,13 @@ logger = logging.getLogger("CrossArbitrage")
 class CrossExchangeArbitrageStrategy:
     def __init__(
         self,
-        min_entry_spread_pct: float = 0.150,   # Dislocació mínima d'entrada (+0.150% per cobrir comissions i garantir guany net)
-        weekend_min_spread_pct: float = 0.120, # Llindar dinàmic per a caps de setmana (volum més tranquil)
+        min_entry_spread_pct: float = 0.170,   # Dislocació mínima d'entrada entre setmana (+0.170% per a benefici net ampli)
+        weekend_min_spread_pct: float = 0.150, # Llindar dinàmic per a caps de setmana (+0.150% garantint marge sobre comissions)
         auto_weekend_adjust: bool = True,       # Ajust automàtic segons calendari UTC
-        min_funding_harvest_apr: float = 8.0,  # Llindar d'APR per obrir collita de funding passiu (ex: +8.0%)
+        min_funding_harvest_apr: float = 12.0, # Llindar d'APR per obrir collita de funding passiu (+12.0% APR)
         target_exit_spread_pct: float = 0.010, # Convergència de sortida (<= +0.010%)
-        min_profit_usd: float = 0.05,          # Benefici net mínim permes a la convergència (+0.05$)
-        take_profit_usd: float = 0.50,         # Tancament automàtic per benefici substancial (+0.50$)
+        min_profit_usd: float = 0.20,          # Benefici net mínim garantit per trade tancat (+0.20$)
+        take_profit_usd: float = 0.60,         # Tancament automàtic per benefici substancial (+0.60$)
         max_divergence_pct: float = 2.50,      # Stop de divergència (+2.50% addicional per a deslligaments reals, no metxes de 1 cèntim)
         divergence_min_duration_sec: float = 60.0, # Requereix que la divergència sigui sostinguda almenys 60 segons
         max_hold_seconds: int = 43200,         # 12 hores màxim per posició (permet collir funding passiu)
