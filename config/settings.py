@@ -4,8 +4,8 @@ from typing import List
 from pydantic import BaseModel, Field
 
 class BotConfig(BaseModel):
-    # Parells a monitoritzar i operar
-    coins: List[str] = Field(default_factory=lambda: ["BTC", "ETH", "SOL"])
+    # Parells a monitoritzar i operar (Centrat en BTC per màxima liquiditat i mínim soroll)
+    coins: List[str] = Field(default_factory=lambda: ["BTC"])
     
     # Endpoints de Hyperliquid
     mainnet_ws_url: str = "wss://api.hyperliquid.xyz/ws"
@@ -20,14 +20,14 @@ class BotConfig(BaseModel):
     maker_fee_rate: float = 0.00010  # 0.01% (pot ser 0% o negatiu amb rebates)
     taker_fee_rate: float = 0.00035  # 0.035%
     
-    # Gestió de posició per minioperació
-    position_size_usd: float = 500.0  # Mida de cada ordre en dòlars
-    max_open_positions: int = 3       # Màxim de posicions simultànies globals
+    # Gestió de posició per minioperació (1.000$ per trade = 10% del compte)
+    position_size_usd: float = 1000.0  # Mida de cada ordre en dòlars
+    max_open_positions: int = 2        # Màxim de posicions simultànies globals
     max_positions_per_coin: int = 1
     
-    # Objectius de Scalping per defecte (+0.18% TP, -0.20% SL)
-    default_take_profit_pct: float = 0.0018  # +0.18%
-    default_stop_loss_pct: float = 0.0020    # -0.20%
+    # Objectius de Scalping per defecte (+0.080% TP, -0.180% SL per BTC)
+    default_take_profit_pct: float = 0.00080  # +0.080%
+    default_stop_loss_pct: float = 0.00180    # -0.180%
     
     # Circuit Breaker (Protecció de capital)
     max_daily_loss_usd: float = 200.0  # Si perdem 200$, el bot atura totes les noves entrades

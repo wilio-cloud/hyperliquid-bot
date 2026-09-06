@@ -16,5 +16,5 @@ COPY . .
 # Port web per veure el tauler des del mòbil / navegador
 EXPOSE 8080
 
-# Executa el mode combinat guanyador en segon pla
-CMD ["python", "main.py", "--coins", "BTC", "ETH", "SOL", "--no-burst", "--headless"]
+# Executa el mode combinat guanyador en segon pla només per BTC
+CMD ["python", "main.py", "--coins", "BTC", "--no-burst", "--headless"]

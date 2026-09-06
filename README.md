@@ -72,9 +72,10 @@ PYTHONPATH=. .venv/bin/python tests/test_bot.py
 ## Configuració (`config/settings.py`)
 
 Pots ajustar els paràmetres a `config/settings.py`:
-* `coins`: Llista de parells a monitoritzar (ex: `["BTC", "ETH", "SOL"]`).
-* `position_size_usd`: Mida de cada operació en dòlars (ex: `500.0`).
-* `default_take_profit_pct`: Objectiu de guany per operació (ex: `0.0018` = +0.18%).
-* `default_stop_loss_pct`: Límit de pèrdua (ex: `0.0020` = -0.20%).
-* `max_daily_loss_usd`: Circuit breaker que atura el bot si s'acumulen pèrdues.
-* `maker_fee_rate`: Taxa de comissió Maker (ex: `0.0001` = 0.01%).
+* `coins`: Llista de parells a monitoritzar (per defecte: `["BTC"]` per màxima liquiditat i absència de fuetades).
+* `position_size_usd`: Mida de cada operació en dòlars (`1000.0` $).
+* `default_take_profit_pct`: Objectiu de guany per operació (`0.0008` = +0.080%).
+* `default_stop_loss_pct`: Límit de pèrdua (`0.0018` = -0.180%).
+* `max_daily_loss_usd`: Circuit breaker que atura el bot si s'acumulen pèrdues (`200.0` $).
+* `maker_fee_rate`: Taxa de comissió Maker Hyperliquid (`0.0001` = 0.01%).
+* `taker_fee_rate`: Taxa de comissió Taker Hyperliquid (`0.00035` = 0.035%).

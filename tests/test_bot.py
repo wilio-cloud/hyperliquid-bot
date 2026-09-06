@@ -130,10 +130,32 @@ def test_orderbook_imbalance_strategy():
     assert sig.coin == "BTC"
     assert "Bullish Ratio" in sig.reason
 
+def test_micro_mean_reversion_trend_filter():
+    strat = MicroMeanReversionStrategy(min_signal_interval_sec=0.0, dev_threshold_pct=0.001)
+    
+    # Simulem 25 trades a 60000.0 per alimentar la història
+    now = time.time()
+    for i in range(25):
+        strat.on_trade(Trade(coin="BTC", price=60000.0, size=1.0, side=OrderSide.BUY, timestamp=now))
+    
+    # 1. Preu cau per sota de VWAP (59900.0 vs 60000.0, dev -0.16%)
+    # Però l'EMA és 60000.0 i el preu actual és 59900.0 (per sota de la macro EMA) -> Ganivet que cau! Ha de ser descartat
+    book_knife = make_sample_book(coin="BTC", mid=59900.0, spread=2.0)
+    sig_knife = strat.on_book_update(book_knife)
+    assert sig_knife is None, "Hauria de rebutjar comprar si estem sota l'EMA (ganivet que cau)"
+
+    # 2. Ara simulem que la macro-tendència és alcista (EMA pujava des de 59000.0)
+    strat.ema_trend["BTC"] = 59800.0  # El preu (59900.0) està per sobre de l'EMA de 59800 -> Pullback en tendència alcista!
+    sig_valid = strat.on_book_update(book_knife)
+    assert sig_valid is not None
+    assert sig_valid.action == "BUY"
+    assert "Trend Bullish" in sig_valid.reason
+
 if __name__ == "__main__":
     test_paper_exchange_post_only_rejection()
     test_paper_exchange_order_queue_and_fill()
     test_paper_exchange_take_profit()
     test_risk_manager_circuit_breaker()
     test_orderbook_imbalance_strategy()
+    test_micro_mean_reversion_trend_filter()
     print("Tots els tests unitaris han passat correctament!")

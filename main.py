@@ -198,7 +198,7 @@ class TradingBotApp:
 
 def main():
     parser = argparse.ArgumentParser(description="Hyperliquid High-Frequency Scalping Bot")
-    parser.add_argument("--coins", nargs="+", default=["BTC", "ETH", "SOL"], help="Monedes a operar (ex: BTC ETH SOL)")
+    parser.add_argument("--coins", nargs="+", default=["BTC"], help="Monedes a operar (ex: BTC)")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich (només logs)")
     parser.add_argument("--no-burst", action="store_true", help="Desactivar Volume Burst (recomanat)")
