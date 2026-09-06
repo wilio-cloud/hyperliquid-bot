@@ -1,0 +1,139 @@
+"""Suite de tests unitaris per al motor de paper trading, risc i estratègies."""
+
+import time
+from core.models import BookLevel, OrderBookL2, OrderSide, OrderType, Trade
+from core.paper_exchange import PaperExchange
+from core.risk_manager import RiskManager
+from strategies.orderbook_imbalance import OrderBookImbalanceStrategy
+from strategies.volume_burst import VolumeBurstStrategy
+from strategies.micro_mean_reversion import MicroMeanReversionStrategy
+
+def make_sample_book(coin="BTC", mid=60000.0, spread=2.0, bid_sz=10.0, ask_sz=10.0):
+    best_bid = mid - (spread / 2.0)
+    best_ask = mid + (spread / 2.0)
+    bids = [
+        BookLevel(price=best_bid, size=bid_sz),
+        BookLevel(price=best_bid - 1.0, size=bid_sz),
+        BookLevel(price=best_bid - 2.0, size=bid_sz),
+        BookLevel(price=best_bid - 3.0, size=bid_sz),
+        BookLevel(price=best_bid - 4.0, size=bid_sz),
+    ]
+    asks = [
+        BookLevel(price=best_ask, size=ask_sz),
+        BookLevel(price=best_ask + 1.0, size=ask_sz),
+        BookLevel(price=best_ask + 2.0, size=ask_sz),
+        BookLevel(price=best_ask + 3.0, size=ask_sz),
+        BookLevel(price=best_ask + 4.0, size=ask_sz),
+    ]
+    return OrderBookL2(coin=coin, timestamp=time.time(), bids=bids, asks=asks)
+
+def test_paper_exchange_post_only_rejection():
+    exchange = PaperExchange(initial_balance=10000.0)
+    book = make_sample_book(coin="BTC", mid=60000.0, spread=2.0)
+    
+    # Intentar comprar per sobre o igual al best ask com a post-only ha de ser REJECTED
+    order = exchange.place_order(
+        coin="BTC",
+        side=OrderSide.BUY,
+        price=book.best_ask,
+        size_usd=500.0,
+        post_only=True,
+        current_book=book,
+    )
+    assert order is not None
+    assert order.status.value == "REJECTED"
+
+def test_paper_exchange_order_queue_and_fill():
+    exchange = PaperExchange(initial_balance=10000.0)
+    book = make_sample_book(coin="BTC", mid=60000.0, spread=2.0, bid_sz=1.0)
+    
+    # Comprem al best bid (59999.0). Hi ha 1.0 BTC de cua davant nostre
+    order = exchange.place_order(
+        coin="BTC",
+        side=OrderSide.BUY,
+        price=book.best_bid,
+        size_usd=600.0,
+        post_only=True,
+        strategy_name="TestStrat",
+        current_book=book,
+    )
+    assert order.status.value == "OPEN"
+    assert order.order_id in exchange.open_orders
+    assert exchange.open_orders[order.order_id].queue_ahead == 1.0
+
+    # Arriba un trade que ven només 0.5 BTC -> la cua es redueix però no s'omple
+    trade1 = Trade(coin="BTC", side=OrderSide.SELL, price=book.best_bid, size=0.5, timestamp=time.time())
+    exchange.on_trade(trade1)
+    assert order.order_id in exchange.open_orders
+    assert abs(exchange.open_orders[order.order_id].queue_ahead - 0.5) < 1e-5
+
+    # Arriba un altre trade de 0.6 BTC -> s'omple l'ordre i s'obre la posició
+    trade2 = Trade(coin="BTC", side=OrderSide.SELL, price=book.best_bid, size=0.6, timestamp=time.time())
+    exchange.on_trade(trade2)
+    assert order.order_id not in exchange.open_orders
+    assert "BTC" in exchange.positions
+    pos = exchange.positions["BTC"]
+    assert pos.entry_price == book.best_bid
+    assert pos.strategy_name == "TestStrat"
+    assert exchange.total_maker_orders == 1
+
+def test_paper_exchange_take_profit():
+    exchange = PaperExchange(initial_balance=10000.0)
+    book = make_sample_book(coin="BTC", mid=60000.0, spread=2.0, bid_sz=0.1)
+    
+    order = exchange.place_order(
+        coin="BTC",
+        side=OrderSide.BUY,
+        price=book.best_bid,
+        size_usd=600.0,
+        post_only=True,
+        current_book=book,
+    )
+    # Fill order
+    exchange.on_trade(Trade(coin="BTC", side=OrderSide.SELL, price=book.best_bid, size=1.0, timestamp=time.time()))
+    pos = exchange.positions["BTC"]
+    tp_target = pos.take_profit
+
+    # El mercat puja fins al Take Profit
+    higher_book = make_sample_book(coin="BTC", mid=tp_target, spread=1.0)
+    exchange.on_book_update(higher_book)
+
+    # La posició ha d'haver tancat en positiu
+    assert "BTC" not in exchange.positions
+    assert len(exchange.closed_positions) == 1
+    assert exchange.closed_positions[0].realized_pnl > 0
+    assert exchange.closed_positions[0].exit_reason == "TAKE_PROFIT"
+    assert exchange.balance_usd > 10000.0
+
+def test_risk_manager_circuit_breaker():
+    rm = RiskManager()
+    # Pèrdua acumulada de 250$ quan el límit és 200$
+    can_open, reason = rm.can_open_position(
+        coin="ETH",
+        current_balance=9750.0,
+        initial_balance=10000.0,
+        open_positions_count=0,
+        has_existing_coin_position=False,
+    )
+    assert can_open is False
+    assert "CIRCUIT BREAKER" in reason
+
+def test_orderbook_imbalance_strategy():
+    strat = OrderBookImbalanceStrategy(imbalance_ratio=2.5, min_signal_interval_sec=0.0)
+    
+    # Book amb fort desequilibri de compra (30 BTC a bids vs 5 BTC a asks)
+    book = make_sample_book(coin="BTC", mid=60000.0, spread=1.0, bid_sz=30.0, ask_sz=5.0)
+    sig = strat.on_book_update(book)
+    
+    assert sig is not None
+    assert sig.action == "BUY"
+    assert sig.coin == "BTC"
+    assert "Bullish Ratio" in sig.reason
+
+if __name__ == "__main__":
+    test_paper_exchange_post_only_rejection()
+    test_paper_exchange_order_queue_and_fill()
+    test_paper_exchange_take_profit()
+    test_risk_manager_circuit_breaker()
+    test_orderbook_imbalance_strategy()
+    print("Tots els tests unitaris han passat correctament!")
