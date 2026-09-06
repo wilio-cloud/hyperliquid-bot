@@ -192,7 +192,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 if (thLeg) thLeg.innerText = `Pota ${v2Name}`;
 
                 const tagEl = document.getElementById('mode-tag');
-                if (tagEl) tagEl.innerText = `DELTA-NEUTRAL ARB (${m.leverage_str || '2x'})`;
+                if (tagEl) {
+                    const regTxt = m.regime_label ? ` • ${m.regime_label}` : '';
+                    tagEl.innerText = `DELTA-NEUTRAL ARB (${m.leverage_str || '2x'})${regTxt}`;
+                }
 
                 // Mètriques principals
                 const totalBal = (typeof m.balance === 'number') ? m.balance : 1000.0;
@@ -217,10 +220,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 document.getElementById('uptime').innerText = 'Temps actiu: ' + (data.uptime || '-');
 
                 // Taula Spreads
-                const minSpreadVal = (typeof m.min_spread === 'number') ? m.min_spread : 0.150;
+                const minSpreadVal = (typeof m.min_spread === 'number') ? m.min_spread : 0.120;
                 const minSpreadLabel = document.getElementById('min-spread-label');
                 if (minSpreadLabel) {
-                    minSpreadLabel.innerHTML = `Llindar mínim: <b style="color: #10b981;">±${minSpreadVal.toFixed(3)}%</b> (Marge Net Garantit)`;
+                    const regDesc = m.is_weekend ? 'Mode Cap de Setmana' : 'Mode Setmanal';
+                    minSpreadLabel.innerHTML = `Llindar mínim: <b style="color: #10b981;">±${minSpreadVal.toFixed(3)}%</b> (${regDesc})`;
                 }
 
                 const spreadsBody = document.getElementById('spreads-body');

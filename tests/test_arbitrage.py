@@ -325,6 +325,36 @@ def test_dashboard_signal_status_accuracy():
     assert sol_data["exec_spread_pct"] < 0.150
     print("  Precisió de senyals del tauler verificada amb èxit.")
 
+def test_weekend_regime_and_funding_harvest():
+    """Verifica l'adaptació de cap de setmana (0.120%) i la collita de funding rates."""
+    from strategies.cross_arbitrage import CrossExchangeArbitrageStrategy
+    strat = CrossExchangeArbitrageStrategy(
+        min_entry_spread_pct=0.150,
+        weekend_min_spread_pct=0.120,
+        auto_weekend_adjust=True,
+        min_funding_harvest_apr=8.0,
+    )
+    assert isinstance(strat.is_weekend_regime, bool)
+    if strat.is_weekend_regime:
+        assert strat.effective_min_spread == 0.120
+    else:
+        assert strat.effective_min_spread == 0.150
+
+    # Simulem llibres equilibrats (sense spread de preu, 0.0%)
+    strat.update_hl_book(OrderBookL2(coin="BTC", timestamp=1.0, bids=[BookLevel(price=80000.0, size=1.0)], asks=[BookLevel(price=80001.0, size=1.0)]))
+    strat.update_bn_book(OrderBookL2(coin="BTC", timestamp=1.0, bids=[BookLevel(price=80000.0, size=1.0)], asks=[BookLevel(price=80001.0, size=1.0)]))
+    
+    # Sense diferencial de funding, no hi ha senyal
+    assert strat.evaluate_entry("BTC") is None
+
+    # Ara simulem Funding disparat a HL (+0.002% per hora = +17.5% APR) i 0% a dYdX
+    strat.update_hl_funding("BTC", 0.0020) # 0.002% * 24 * 365 = 17.52% APR
+    sig = strat.evaluate_entry("BTC")
+    assert sig is not None, "Hauria de generar senyal de Funding Harvest quan l'APR supera el llindar!"
+    assert sig.direction == ArbitrageDirection.SELL_HL_BUY_BN
+    assert "Funding Harvest" in sig.reason
+    print("  Règim de cap de setmana i Funding Harvest verificats amb èxit.")
+
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
     test_arbitrage_execution_and_pnl()
@@ -334,4 +364,5 @@ if __name__ == "__main__":
     test_book_spread_guard_blocks_illiquid_entry()
     test_dynamic_position_sizing()
     test_dashboard_signal_status_accuracy()
+    test_weekend_regime_and_funding_harvest()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")

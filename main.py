@@ -256,7 +256,7 @@ class ArbitrageTradingBotApp:
                 elif max_inner > self.strategy.max_book_spread_pct:
                     signal_type = "BLOCKED"
                     signal_status = f"⚠️ LLIBRE AMPLI ({max_inner:.2f}%)"
-                elif best_exec_pct >= (self.strategy.min_entry_spread_pct * 0.65):
+                elif best_exec_pct >= (self.strategy.effective_min_spread * 0.65):
                     signal_type = "APROP"
                     signal_status = f"⏳ APROP ({best_exec_pct:.3f}%)"
                 elif abs(info.annual_funding_diff_apr) >= 15.0:
@@ -316,7 +316,13 @@ class ArbitrageTradingBotApp:
         metrics["dynamic_size"] = self.dynamic_size
         metrics["current_order_size"] = current_size
         metrics["size_pct"] = self.size_pct
-        metrics["min_spread"] = self.strategy.min_entry_spread_pct
+        is_wk = self.strategy.is_weekend_regime
+        eff_spread = self.strategy.effective_min_spread
+        metrics["is_weekend"] = is_wk
+        metrics["min_spread"] = eff_spread
+        metrics["weekday_min_spread"] = self.strategy.min_entry_spread_pct
+        metrics["weekend_min_spread"] = self.strategy.weekend_min_spread_pct
+        metrics["regime_label"] = f"🗓️ CAP DE SETMANA ({eff_spread:.3f}%)" if is_wk else f"⚡ SETMANAL ({eff_spread:.3f}%)"
         metrics["max_book_spread"] = self.strategy.max_book_spread_pct
 
         return {

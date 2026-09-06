@@ -1,5 +1,6 @@
 """Estratègia d'Arbitratge Delta-Neutral Creuat (Hyperliquid vs Binance Futures)."""
 
+import datetime
 import logging
 import time
 from typing import Dict, List, Optional, Tuple
@@ -18,6 +19,9 @@ class CrossExchangeArbitrageStrategy:
     def __init__(
         self,
         min_entry_spread_pct: float = 0.150,   # Dislocació mínima d'entrada (+0.150% per cobrir comissions i garantir guany net)
+        weekend_min_spread_pct: float = 0.120, # Llindar dinàmic per a caps de setmana (volum més tranquil)
+        auto_weekend_adjust: bool = True,       # Ajust automàtic segons calendari UTC
+        min_funding_harvest_apr: float = 8.0,  # Llindar d'APR per obrir collita de funding passiu (ex: +8.0%)
         target_exit_spread_pct: float = 0.010, # Convergència de sortida (<= +0.010%)
         min_profit_usd: float = 0.05,          # Benefici net mínim permes a la convergència (+0.05$)
         take_profit_usd: float = 0.50,         # Tancament automàtic per benefici substancial (+0.50$)
@@ -28,6 +32,9 @@ class CrossExchangeArbitrageStrategy:
     ):
         self.name = "CROSS_ARBITRAGE"
         self.min_entry_spread_pct = min_entry_spread_pct
+        self.weekend_min_spread_pct = weekend_min_spread_pct
+        self.auto_weekend_adjust = auto_weekend_adjust
+        self.min_funding_harvest_apr = min_funding_harvest_apr
         self.target_exit_spread_pct = target_exit_spread_pct
         self.min_profit_usd = min_profit_usd
         self.take_profit_usd = take_profit_usd
@@ -44,6 +51,26 @@ class CrossExchangeArbitrageStrategy:
         self.bn_funding_8h_pct: Dict[str, float] = {}
 
         self.signals_count = 0
+
+    @property
+    def is_weekend_regime(self) -> bool:
+        """Determina si estem en règim de cap de setmana (divendres 21:00 UTC a diumenge 22:00 UTC)."""
+        now = datetime.datetime.now(datetime.timezone.utc)
+        w = now.weekday()
+        if w == 4 and now.hour >= 21:
+            return True
+        if w == 5:
+            return True
+        if w == 6 and now.hour < 22:
+            return True
+        return False
+
+    @property
+    def effective_min_spread(self) -> float:
+        """Retorna el llindar efectiu: 0.120% en cap de setmana, 0.150% entre setmana."""
+        if self.auto_weekend_adjust and self.is_weekend_regime:
+            return self.weekend_min_spread_pct
+        return self.min_entry_spread_pct
 
     def update_hl_book(self, book: OrderBookL2):
         self.hl_books[book.coin] = book
@@ -124,8 +151,10 @@ class CrossExchangeArbitrageStrategy:
             if bn_inner_spread > self.max_book_spread_pct:
                 return None
 
-        # Cas 1: Preu HL supera BN
-        if info.spread_sell_hl_buy_bn_pct >= self.min_entry_spread_pct:
+        target_spread = self.effective_min_spread
+
+        # Cas 1: Preu HL supera BN (Dislocació de spread)
+        if info.spread_sell_hl_buy_bn_pct >= target_spread:
             self.signals_count += 1
             return ArbitrageSignal(
                 coin=coin,
@@ -136,11 +165,11 @@ class CrossExchangeArbitrageStrategy:
                 hl_funding_8h_pct=info.hl_funding_8h_pct,
                 bn_funding_8h_pct=info.bn_funding_8h_pct,
                 net_funding_apr=info.annual_funding_diff_apr,
-                reason=f"Spread HL>BN: {info.spread_sell_hl_buy_bn_pct:+.3f}% >= {self.min_entry_spread_pct:.3f}% (APR Dif: {info.annual_funding_diff_apr:+.1f}%)",
+                reason=f"Spread HL>BN: {info.spread_sell_hl_buy_bn_pct:+.3f}% >= {target_spread:.3f}% (APR Dif: {info.annual_funding_diff_apr:+.1f}%)",
             )
 
-        # Cas 2: Preu BN supera HL
-        if info.spread_buy_hl_sell_bn_pct >= self.min_entry_spread_pct:
+        # Cas 2: Preu BN supera HL (Dislocació de spread)
+        if info.spread_buy_hl_sell_bn_pct >= target_spread:
             self.signals_count += 1
             return ArbitrageSignal(
                 coin=coin,
@@ -151,7 +180,37 @@ class CrossExchangeArbitrageStrategy:
                 hl_funding_8h_pct=info.hl_funding_8h_pct,
                 bn_funding_8h_pct=info.bn_funding_8h_pct,
                 net_funding_apr=-info.annual_funding_diff_apr,
-                reason=f"Spread BN>HL: {info.spread_buy_hl_sell_bn_pct:+.3f}% >= {self.min_entry_spread_pct:.3f}% (APR Dif: {-info.annual_funding_diff_apr:+.1f}%)",
+                reason=f"Spread BN>HL: {info.spread_buy_hl_sell_bn_pct:+.3f}% >= {target_spread:.3f}% (APR Dif: {-info.annual_funding_diff_apr:+.1f}%)",
+            )
+
+        # Cas 3: Collita de Funding Rate (Carry Trade delta-neutral)
+        # Permet entrada si la diferència de funding és molt atractiva i el spread de preu no ens suposa pèrdua (>= -0.040%)
+        min_harvest_apr = self.min_funding_harvest_apr if self.is_weekend_regime else (self.min_funding_harvest_apr * 1.5)
+        if info.annual_funding_diff_apr >= min_harvest_apr and info.spread_sell_hl_buy_bn_pct >= -0.040:
+            self.signals_count += 1
+            return ArbitrageSignal(
+                coin=coin,
+                direction=ArbitrageDirection.SELL_HL_BUY_BN,
+                hl_price=info.hl_bid,
+                bn_price=info.bn_ask,
+                spread_pct=info.spread_sell_hl_buy_bn_pct,
+                hl_funding_8h_pct=info.hl_funding_8h_pct,
+                bn_funding_8h_pct=info.bn_funding_8h_pct,
+                net_funding_apr=info.annual_funding_diff_apr,
+                reason=f"Funding Harvest HL>BN (+{info.annual_funding_diff_apr:.1f}% APR)",
+            )
+        elif -info.annual_funding_diff_apr >= min_harvest_apr and info.spread_buy_hl_sell_bn_pct >= -0.040:
+            self.signals_count += 1
+            return ArbitrageSignal(
+                coin=coin,
+                direction=ArbitrageDirection.BUY_HL_SELL_BN,
+                hl_price=info.hl_ask,
+                bn_price=info.bn_bid,
+                spread_pct=info.spread_buy_hl_sell_bn_pct,
+                hl_funding_8h_pct=info.hl_funding_8h_pct,
+                bn_funding_8h_pct=info.bn_funding_8h_pct,
+                net_funding_apr=-info.annual_funding_diff_apr,
+                reason=f"Funding Harvest BN>HL (+{-info.annual_funding_diff_apr:.1f}% APR)",
             )
 
         return None
