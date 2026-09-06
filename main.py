@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import sys
 import time
@@ -45,8 +46,8 @@ class ArbitrageTradingBotApp:
     def __init__(
         self,
         coins: List[str],
-        min_spread: float = 0.080,
-        exit_spread: float = 0.015,
+        min_spread: float = 0.180,
+        exit_spread: float = 0.010,
         size_usd: float = 1000.0,
         headless: bool = False,
     ):
@@ -402,11 +403,13 @@ class DirectionalScalperApp:
         await self.ws_client.stop()
 
 def main():
+    min_spread_default = float(os.environ.get("MIN_SPREAD", "0.180"))
+    exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
     parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + Binance)")
     parser.add_argument("--mode", choices=["arbitrage", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (recomanat) o 'scalper'")
     parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL LINK NEAR SUI DOGE)")
-    parser.add_argument("--min-spread", type=float, default=0.140, help="Spread mínim percentual d'entrada per a l'arbitratge (default: 0.140%%)")
-    parser.add_argument("--exit-spread", type=float, default=0.020, help="Spread màxim percentual de sortida/convergència (default: 0.020%%)")
+    parser.add_argument("--min-spread", type=float, default=min_spread_default, help="Spread mínim percentual d'entrada per a l'arbitratge (default: 0.180%%)")
+    parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
     parser.add_argument("--size", type=float, default=1000.0, help="Mida en dòlars per ordre/pota")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")

@@ -124,8 +124,79 @@ def test_funding_accrual():
     assert pos.accumulated_funding > 0.0
     assert exchange.total_funding_collected > 0.0
 
+def test_profit_guard_blocks_unprofitable_convergence():
+    """Verifica que el bot NO tanca per convergència si el benefici net projectat no cobreix comissions."""
+    exchange = ArbitragePaperExchange(initial_hl_balance=5000.0, initial_bn_balance=5000.0)
+    strat = CrossExchangeArbitrageStrategy(
+        min_entry_spread_pct=0.180,
+        target_exit_spread_pct=0.010,
+        min_profit_usd=0.05,
+    )
+
+    # Simulem una entrada a spread estret de 0.120%
+    # HL sell @ 100.12, BN buy @ 100.00
+    signal = ArbitrageSignal(
+        coin="SOL",
+        direction=ArbitrageDirection.SELL_HL_BUY_BN,
+        hl_price=100.12,
+        bn_price=100.00,
+        spread_pct=0.120,
+    )
+    pos = exchange.open_arbitrage_position(signal, size_usd=1000.0)
+    assert pos is not None
+
+    # Simulem convergència superficial: HL ask 100.01, BN bid 100.00 (spread 0.010% <= target_exit_spread_pct)
+    # Gross captured: 0.120% - 0.010% = 0.110% = 1.10$.
+    # Comissions totals = 1.50$.
+    # Resultat net projectat: 1.10$ - 1.50$ = -0.40$ < 0.05$.
+    hl_shallow = OrderBookL2(
+        coin="SOL",
+        timestamp=2000.0,
+        bids=[BookLevel(price=100.00, size=10.0)],
+        asks=[BookLevel(price=100.01, size=10.0)],
+    )
+    bn_shallow = OrderBookL2(
+        coin="SOL",
+        timestamp=2000.0,
+        bids=[BookLevel(price=100.00, size=10.0)],
+        asks=[BookLevel(price=100.01, size=10.0)],
+    )
+    strat.update_hl_book(hl_shallow)
+    strat.update_bn_book(bn_shallow)
+
+    # El bot HA DE BLOQUEJAR el tancament per evitar registrar una pèrdua
+    exit_check = strat.check_exit(pos)
+    assert exit_check is None, "El bot hauria d'haver bloquejat el tancament per PnL net negatiu!"
+
+    # Ara simulem que el spread creua a inversió (HL ask 99.90, BN bid 100.05)
+    # Gross captured = (100.12 - 99.90) + (100.05 - 100.00) = 0.22 + 0.05 = 0.27% = 2.70$
+    # Net = 2.70$ - 1.50$ = +1.20$ >= 0.05$
+    hl_deep = OrderBookL2(
+        coin="SOL",
+        timestamp=2010.0,
+        bids=[BookLevel(price=99.89, size=10.0)],
+        asks=[BookLevel(price=99.90, size=10.0)],
+    )
+    bn_deep = OrderBookL2(
+        coin="SOL",
+        timestamp=2010.0,
+        bids=[BookLevel(price=100.05, size=10.0)],
+        asks=[BookLevel(price=100.06, size=10.0)],
+    )
+    strat.update_hl_book(hl_deep)
+    strat.update_bn_book(bn_deep)
+
+    exit_check2 = strat.check_exit(pos)
+    assert exit_check2 is not None
+    assert exit_check2[0] in ("CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET")
+
+    closed = exchange.close_arbitrage_position(pos.pair_id, exit_check2[1], exit_check2[2], reason=exit_check2[0])
+    assert closed.realized_pnl > 0.0
+    print(f"  Guany net registrat amb profit guard: {closed.realized_pnl:+.3f}$")
+
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
     test_arbitrage_execution_and_pnl()
     test_funding_accrual()
+    test_profit_guard_blocks_unprofitable_convergence()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")

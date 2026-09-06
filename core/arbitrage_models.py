@@ -79,9 +79,13 @@ class ArbitragePosition(BaseModel):
         """Actualitza el PnL combinat de totes dues potes i afegeix funding."""
         self.total_fees = self.leg_hl.fees_paid + self.leg_bn.fees_paid
         if not self.is_closed:
+            # Comissions estimades de sortida per mostrar el PnL Net REAL exacte
+            hl_px = self.leg_hl.current_price or self.leg_hl.entry_price
+            bn_px = self.leg_bn.current_price or self.leg_bn.entry_price
+            est_exit_fees = (self.leg_hl.size * hl_px * self.leg_hl.fee_rate) + (self.leg_bn.size * bn_px * self.leg_bn.fee_rate)
             self.unrealized_pnl = (
                 self.leg_hl.unrealized_pnl + self.leg_bn.unrealized_pnl
-                + self.accumulated_funding - self.total_fees
+                + self.accumulated_funding - (self.total_fees + est_exit_fees)
             )
         else:
             self.realized_pnl = (

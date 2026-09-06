@@ -85,7 +85,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="card-table">
             <div class="table-title">
                 <span>📊 Monitor de Spreads i Funding en Temps Real</span>
-                <span style="font-size: 0.8rem; font-weight: normal; color: #94a3b8;">Llindar mínim: <b>±0.080%</b></span>
+                <span style="font-size: 0.8rem; font-weight: normal; color: #94a3b8;">Llindar mínim: <b style="color: #10b981;">±0.180%</b> (Marge Net Garantit)</span>
             </div>
             <table>
                 <thead>
@@ -197,12 +197,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 if (data.spreads && data.spreads.length > 0) {
                     spreadsBody.innerHTML = data.spreads.map(s => {
                         const spreadVal = s.spread_pct || 0.0;
-                        const spreadColor = Math.abs(spreadVal) >= 0.140 ? 'green' : 'white';
+                        const spreadColor = Math.abs(spreadVal) >= 0.180 ? 'green' : (Math.abs(spreadVal) >= 0.120 ? 'yellow' : 'white');
                         let signalTag = '<span class="tag-neutral">NORMAL</span>';
-                        if (spreadVal >= 0.140) {
+                        if (spreadVal >= 0.180) {
                             signalTag = '<span class="tag-signal tag-buy">🔥 SELL HL / BUY BN</span>';
-                        } else if (spreadVal <= -0.140) {
+                        } else if (spreadVal <= -0.180) {
                             signalTag = '<span class="tag-signal tag-sell">🔥 BUY HL / SELL BN</span>';
+                        } else if (Math.abs(spreadVal) >= 0.120) {
+                            signalTag = '<span class="tag-signal" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #38bdf8;">⏳ APROP (' + Math.abs(spreadVal).toFixed(3) + '%)</span>';
                         } else if (Math.abs(s.annual_funding_diff_apr || 0) >= 15.0) {
                             signalTag = '<span class="tag-signal" style="background: rgba(250, 204, 21, 0.15); color: #facc15; border: 1px solid #facc15;">💰 HARVEST APR</span>';
                         }
@@ -259,7 +261,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     closedBody.innerHTML = data.recent_closed.slice().reverse().map(p => {
                         const pnlVal = p.realized_pnl || 0.0;
                         const pnlColor = pnlVal >= 0 ? 'green' : 'red';
-                        const reasonColor = p.exit_reason === 'CONVERGENCE_TARGET' ? 'green' : 'yellow';
+                        const reasonColor = (p.exit_reason === 'CONVERGENCE_TARGET' || p.exit_reason === 'TAKE_PROFIT_TARGET') ? 'green' : 'yellow';
                         return `<tr>
                             <td style="font-weight: bold; color: #facc15;">${p.coin}</td>
                             <td style="color: #38bdf8;">${p.direction}</td>

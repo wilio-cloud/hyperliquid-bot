@@ -17,14 +17,18 @@ logger = logging.getLogger("CrossArbitrage")
 class CrossExchangeArbitrageStrategy:
     def __init__(
         self,
-        min_entry_spread_pct: float = 0.140,   # Dislocació mínima d'entrada (+0.140% per cobrir comissions)
-        target_exit_spread_pct: float = 0.020, # Convergència de sortida (<= +0.020%)
+        min_entry_spread_pct: float = 0.180,   # Dislocació mínima d'entrada (+0.180% per cobrir comissions i garantir guany)
+        target_exit_spread_pct: float = 0.010, # Convergència de sortida (<= +0.010%)
+        min_profit_usd: float = 0.05,          # Benefici net mínim permes a la convergència (+0.05$)
+        take_profit_usd: float = 0.50,         # Tancament automàtic per benefici substancial (+0.50$)
         max_divergence_pct: float = 0.40,      # Stop de divergència (+0.40% addicional respecte l'entrada)
         max_hold_seconds: int = 14400,         # 4 hores màxim per posició
     ):
         self.name = "CROSS_ARBITRAGE"
         self.min_entry_spread_pct = min_entry_spread_pct
         self.target_exit_spread_pct = target_exit_spread_pct
+        self.min_profit_usd = min_profit_usd
+        self.take_profit_usd = take_profit_usd
         self.max_divergence_pct = max_divergence_pct
         self.max_hold_seconds = max_hold_seconds
 
@@ -156,11 +160,26 @@ class CrossExchangeArbitrageStrategy:
             current_spread_to_close = ((hl_exit_px - bn_exit_px) / global_mid) * 100.0
             pos.current_spread_pct = current_spread_to_close
 
-            # Convergència reeixida (els preus han tornat a alinear-se)
-            if current_spread_to_close <= self.target_exit_spread_pct:
-                return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
+            # Càlcul del PnL net projectat si tanquem en aquest instant:
+            hl_gross = (pos.leg_hl.entry_price - hl_exit_px) * pos.leg_hl.size
+            bn_gross = (bn_exit_px - pos.leg_bn.entry_price) * pos.leg_bn.size
+            hl_exit_fee = pos.leg_hl.size * hl_exit_px * pos.leg_hl.fee_rate
+            bn_exit_fee = pos.leg_bn.size * bn_exit_px * pos.leg_bn.fee_rate
+            projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
+            projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
-            # Stop loss només si el spread divergeix un marge addicional per sobre de l'entrada
+            # 1. Take profit anticipat si funding o inversió de spread generen un guany substancial
+            if projected_net_pnl >= self.take_profit_usd:
+                return ("TAKE_PROFIT_TARGET", hl_exit_px, bn_exit_px)
+
+            # 2. Convergència reeixida NOMÉS si el benefici net és positiu (cobreix comissions + marge)
+            if current_spread_to_close <= self.target_exit_spread_pct:
+                if projected_net_pnl >= self.min_profit_usd:
+                    return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
+                # Si no arriba al marge mínim, com que la posició és delta-neutral (0 risc direccional),
+                # no tanquem amb pèrdua: mantenim per cobrar funding o esperar una oscil·lació millor
+
+            # 3. Stop loss de divergència catastròfica
             if current_spread_to_close >= (pos.entry_spread_pct + self.max_divergence_pct):
                 return ("STOP_LOSS_DIVERGENCE", hl_exit_px, bn_exit_px)
 
@@ -172,8 +191,20 @@ class CrossExchangeArbitrageStrategy:
             current_spread_to_close = ((bn_exit_px - hl_exit_px) / global_mid) * 100.0
             pos.current_spread_pct = current_spread_to_close
 
+            # Càlcul del PnL net projectat:
+            hl_gross = (hl_exit_px - pos.leg_hl.entry_price) * pos.leg_hl.size
+            bn_gross = (pos.leg_bn.entry_price - bn_exit_px) * pos.leg_bn.size
+            hl_exit_fee = pos.leg_hl.size * hl_exit_px * pos.leg_hl.fee_rate
+            bn_exit_fee = pos.leg_bn.size * bn_exit_px * pos.leg_bn.fee_rate
+            projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
+            projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
+
+            if projected_net_pnl >= self.take_profit_usd:
+                return ("TAKE_PROFIT_TARGET", hl_exit_px, bn_exit_px)
+
             if current_spread_to_close <= self.target_exit_spread_pct:
-                return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
+                if projected_net_pnl >= self.min_profit_usd:
+                    return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
 
             if current_spread_to_close >= (pos.entry_spread_pct + self.max_divergence_pct):
                 return ("STOP_LOSS_DIVERGENCE", hl_exit_px, bn_exit_px)
