@@ -226,10 +226,52 @@ def test_dydx_venue2_integration():
     assert exchange.metrics["venue2_name"] == "DYDX"
     print("  Integració de dYdX v4 verificada amb èxit.")
 
+def test_book_spread_guard_blocks_illiquid_entry():
+    """Verifica que el bot rebutja entrar si algun exchange té un forat intern de liquiditat."""
+    strat = CrossExchangeArbitrageStrategy(
+        min_entry_spread_pct=0.180,
+        max_book_spread_pct=0.120,
+    )
+    # Llibre d'Hyperliquid és líquid (spread 0.02%)
+    hl_book = OrderBookL2(
+        coin="LINK",
+        timestamp=3000.0,
+        bids=[BookLevel(price=12.298, size=100.0)],
+        asks=[BookLevel(price=12.300, size=100.0)],
+    )
+    # Llibre de dYdX és il·líquid (spread 0.94%: bid 12.34, ask 12.456)
+    # Aparentment hi ha un spread global (12.34 - 12.30 = +0.32% > 0.18%)
+    dydx_illiquid = OrderBookL2(
+        coin="LINK",
+        timestamp=3000.0,
+        bids=[BookLevel(price=12.340, size=10.0)],
+        asks=[BookLevel(price=12.456, size=10.0)],
+    )
+    strat.update_hl_book(hl_book)
+    strat.update_bn_book(dydx_illiquid)
+
+    # El filtre HA DE REBUTJAR l'entrada per evitar quedar atrapat al forat de liquiditat
+    sig = strat.evaluate_entry("LINK")
+    assert sig is None, "El bot hauria d'haver rebutjat l'entrada per forat de liquiditat intern (> 0.120%)!"
+
+    # Ara simulem que dYdX té liquiditat estreta (spread 0.05%: bid 12.34, ask 12.346)
+    dydx_liquid = OrderBookL2(
+        coin="LINK",
+        timestamp=3005.0,
+        bids=[BookLevel(price=12.340, size=100.0)],
+        asks=[BookLevel(price=12.346, size=100.0)],
+    )
+    strat.update_bn_book(dydx_liquid)
+    sig2 = strat.evaluate_entry("LINK")
+    assert sig2 is not None, "El bot hauria d'acceptar l'entrada quan el llibre és líquid!"
+    assert sig2.direction == ArbitrageDirection.BUY_HL_SELL_BN
+    print("  Filtre de salut del llibre d'ordres (Book Spread Guard) verificat amb èxit.")
+
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
     test_arbitrage_execution_and_pnl()
     test_funding_accrual()
     test_profit_guard_blocks_unprofitable_convergence()
     test_dydx_venue2_integration()
+    test_book_spread_guard_blocks_illiquid_entry()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")

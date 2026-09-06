@@ -24,6 +24,7 @@ class CrossExchangeArbitrageStrategy:
         max_divergence_pct: float = 2.50,      # Stop de divergència (+2.50% addicional per a deslligaments reals, no metxes de 1 cèntim)
         divergence_min_duration_sec: float = 60.0, # Requereix que la divergència sigui sostinguda almenys 60 segons
         max_hold_seconds: int = 43200,         # 12 hores màxim per posició (permet collir funding passiu)
+        max_book_spread_pct: float = 0.120,    # Llindar màxim d'spread intern (rebutja llibres buits o il·líquids)
     ):
         self.name = "CROSS_ARBITRAGE"
         self.min_entry_spread_pct = min_entry_spread_pct
@@ -33,6 +34,7 @@ class CrossExchangeArbitrageStrategy:
         self.max_divergence_pct = max_divergence_pct
         self.divergence_min_duration_sec = divergence_min_duration_sec
         self.max_hold_seconds = max_hold_seconds
+        self.max_book_spread_pct = max_book_spread_pct
 
         self.hl_books: Dict[str, OrderBookL2] = {}
         self.bn_books: Dict[str, OrderBookL2] = {}
@@ -108,6 +110,19 @@ class CrossExchangeArbitrageStrategy:
         info = self.calculate_spread_info(coin)
         if not info:
             return None
+
+        # Filtre de salut del llibre d'ordres (Book Spread Guard):
+        # Rebutja si el llibre intern de qualsevol exchange és buit o massa ampli (> max_book_spread_pct)
+        hl_book = self.hl_books.get(coin)
+        bn_book = self.bn_books.get(coin)
+        if hl_book and hl_book.best_bid and hl_book.best_ask and hl_book.mid_price > 0:
+            hl_inner_spread = ((hl_book.best_ask - hl_book.best_bid) / hl_book.mid_price) * 100.0
+            if hl_inner_spread > self.max_book_spread_pct:
+                return None
+        if bn_book and bn_book.best_bid and bn_book.best_ask and bn_book.mid_price > 0:
+            bn_inner_spread = ((bn_book.best_ask - bn_book.best_bid) / bn_book.mid_price) * 100.0
+            if bn_inner_spread > self.max_book_spread_pct:
+                return None
 
         # Cas 1: Preu HL supera BN
         if info.spread_sell_hl_buy_bn_pct >= self.min_entry_spread_pct:

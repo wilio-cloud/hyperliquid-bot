@@ -52,12 +52,15 @@ class ArbitrageTradingBotApp:
         exit_spread: float = 0.010,
         size_usd: float = 1000.0,
         headless: bool = False,
+        max_positions: int = 4,
+        max_book_spread: float = 0.120,
     ):
         self.coins = coins
         self.venue2 = venue2.lower()
         self.venue2_label = "dYdX v4" if self.venue2 == "dydx" else "Binance"
         self.size_usd = size_usd
         self.headless = headless
+        self.max_positions = max_positions
         self.start_time = time.time()
 
         self.exchange = ArbitragePaperExchange(
@@ -70,6 +73,7 @@ class ArbitrageTradingBotApp:
         self.strategy = CrossExchangeArbitrageStrategy(
             min_entry_spread_pct=min_spread,
             target_exit_spread_pct=exit_spread,
+            max_book_spread_pct=max_book_spread,
         )
         self.hl_ws = HyperliquidWSClient(
             coins=self.coins,
@@ -154,7 +158,7 @@ class ArbitrageTradingBotApp:
             return
 
         # 3. Avalua noves oportunitats d'entrada si no tenim posició en aquest parell
-        if not self.exchange.has_open_position(coin) and len(self.exchange.active_positions) < 3:
+        if not self.exchange.has_open_position(coin) and len(self.exchange.active_positions) < self.max_positions:
             sig = self.strategy.evaluate_entry(coin)
             if sig:
                 self.exchange.open_arbitrage_position(sig, size_usd=self.size_usd, is_maker=False)
@@ -421,13 +425,17 @@ class DirectionalScalperApp:
 def main():
     min_spread_default = float(os.environ.get("MIN_SPREAD", "0.180"))
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
+    max_positions_default = int(os.environ.get("MAX_POSITIONS", "4"))
+    max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.120"))
     venue2_default = os.environ.get("VENUE2", "dydx").lower()
     parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + dYdX / Binance)")
     parser.add_argument("--mode", choices=["arbitrage", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (recomanat) o 'scalper'")
     parser.add_argument("--venue2", choices=["dydx", "binance"], default=venue2_default, help="Segon exchange per a l'arbitratge: 'dydx' (100%% DEX descentralitzat, legal a la UE/Espanya) o 'binance'")
-    parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL LINK NEAR SUI DOGE)")
+    parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL)")
     parser.add_argument("--min-spread", type=float, default=min_spread_default, help="Spread mínim percentual d'entrada per a l'arbitratge (default: 0.180%%)")
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
+    parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 4)")
+    parser.add_argument("--max-book-spread", type=float, default=max_book_spread_default, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.120%%)")
     parser.add_argument("--size", type=float, default=1000.0, help="Mida en dòlars per ordre/pota")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
@@ -436,7 +444,10 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "arbitrage":
-        coins = args.coins or ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
+        # Per a dYdX prioritzem les monedes d'alta liquiditat institucional (BTC, ETH, SOL)
+        # Per a Binance s'inclouen també les altcoins gràcies a la seva alta densitat de market makers
+        default_coins = ["BTC", "ETH", "SOL"] if args.venue2 == "dydx" else ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
+        coins = args.coins or default_coins
         app = ArbitrageTradingBotApp(
             coins=coins,
             venue2=args.venue2,
@@ -444,6 +455,8 @@ def main():
             exit_spread=args.exit_spread,
             size_usd=args.size,
             headless=args.headless,
+            max_positions=args.max_positions,
+            max_book_spread=args.max_book_spread,
         )
     else:
         coins = args.coins or ["BTC"]
