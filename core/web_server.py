@@ -1,107 +1,159 @@
-"""Servidor web lleuger per monitoritzar el bot des del mòbil o navegador al núvol."""
+"""Servidor web lleuger per monitoritzar el bot d'arbitratge i scalping en viu."""
 
 import os
 import time
 from aiohttp import web
-from core.paper_exchange import PaperExchange
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="ca">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hyperliquid Bot Dashboard</title>
+    <title>Arbitratge Delta-Neutral • Hyperliquid vs Binance</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-        body { background: #0f172a; color: #f8fafc; padding: 16px; }
-        .container { max-width: 900px; margin: 0 auto; }
-        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 12px; }
-        h1 { font-size: 1.25rem; color: #38bdf8; display: flex; align-items: center; gap: 8px; }
-        .badge { background: #10b981; color: #fff; font-size: 0.75rem; padding: 3px 8px; border-radius: 999px; font-weight: bold; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 20px; }
-        .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; }
-        .card .label { font-size: 0.75rem; color: #94a3b8; margin-bottom: 4px; }
-        .card .val { font-size: 1.2rem; font-weight: bold; }
+        body { background: #0b0f19; color: #f8fafc; padding: 16px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #1e293b; padding-bottom: 14px; }
+        h1 { font-size: 1.35rem; color: #38bdf8; display: flex; align-items: center; gap: 10px; }
+        .badge { background: #10b981; color: #fff; font-size: 0.75rem; padding: 3px 10px; border-radius: 999px; font-weight: bold; letter-spacing: 0.5px; }
+        .badge-strategy { background: #6366f1; color: #fff; font-size: 0.75rem; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        .card { background: #131d31; border: 1px solid #1e293b; border-radius: 10px; padding: 14px; }
+        .card .label { font-size: 0.75rem; color: #94a3b8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .card .val { font-size: 1.35rem; font-weight: bold; }
+        .card .sub { font-size: 0.75rem; color: #64748b; margin-top: 4px; }
         .green { color: #10b981; }
         .red { color: #ef4444; }
-        .card-table { background: #1e293b; border: 1px solid #334155; border-radius: 8px; margin-bottom: 20px; overflow-x: auto; }
-        .table-title { padding: 12px 16px; font-weight: bold; font-size: 0.95rem; border-bottom: 1px solid #334155; color: #cbd5e1; }
+        .yellow { color: #facc15; }
+        .purple { color: #c084fc; }
+        .card-table { background: #131d31; border: 1px solid #1e293b; border-radius: 10px; margin-bottom: 24px; overflow-x: auto; }
+        .table-title { padding: 14px 18px; font-weight: bold; font-size: 1rem; border-bottom: 1px solid #1e293b; color: #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
         table { width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left; }
-        th, td { padding: 10px 14px; border-bottom: 1px solid #334155; }
-        th { color: #94a3b8; font-weight: 600; }
+        th, td { padding: 10px 14px; border-bottom: 1px solid #1e293b; }
+        th { color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; }
         tr:last-child td { border-bottom: none; }
-        .footer { text-align: center; font-size: 0.75rem; color: #64748b; margin-top: 20px; }
+        .tag-signal { padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; display: inline-block; }
+        .tag-buy { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid #10b981; }
+        .tag-sell { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid #ef4444; }
+        .tag-neutral { color: #64748b; }
+        .footer { text-align: center; font-size: 0.75rem; color: #475569; margin-top: 24px; }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>⚡ Hyperliquid Scalper <span class="badge">EN VIU</span></h1>
-            <div style="font-size: 0.8rem; color: #94a3b8;" id="uptime">Carregant...</div>
+            <div>
+                <h1>⚡ Arbitratge Delta-Neutral <span class="badge">EN VIU</span></h1>
+                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;">Hyperliquid DEX vs Binance Futures • 0% Risc Direccional</div>
+            </div>
+            <div style="text-align: right;">
+                <span class="badge-strategy" id="mode-tag">DELTA-NEUTRAL ARB</span>
+                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="uptime">Carregant...</div>
+            </div>
         </header>
 
         <div class="grid">
             <div class="card">
-                <div class="label">Balanç</div>
+                <div class="label">Balanç Total</div>
                 <div class="val" id="balance">-</div>
+                <div class="sub" id="balance-sub">HL: - | BN: -</div>
             </div>
             <div class="card">
-                <div class="label">PnL Net</div>
+                <div class="label">PnL Net Total</div>
                 <div class="val" id="pnl">-</div>
+                <div class="sub" id="pnl-sub">Realitzat: -</div>
             </div>
             <div class="card">
-                <div class="label">Winrate</div>
-                <div class="val green" id="winrate">-</div>
+                <div class="label">Funding Cobrat</div>
+                <div class="val green" id="funding">-</div>
+                <div class="sub">Rendiment Passiu (APR)</div>
             </div>
             <div class="card">
                 <div class="label">Operacions</div>
                 <div class="val" id="trades">-</div>
+                <div class="sub" id="winrate-sub">Winrate: -%</div>
             </div>
             <div class="card">
                 <div class="label">Comissions</div>
-                <div class="val" id="fees" style="color: #c084fc;">-</div>
+                <div class="val purple" id="fees">-</div>
+                <div class="sub">Maker & Taker nets</div>
             </div>
         </div>
 
+        <!-- Taula 1: Monitor de Spreads en Viu -->
         <div class="card-table">
-            <div class="table-title">Posicions Obertes Actuals</div>
+            <div class="table-title">
+                <span>📊 Monitor de Spreads i Funding en Temps Real</span>
+                <span style="font-size: 0.8rem; font-weight: normal; color: #94a3b8;">Llindar mínim: <b>±0.080%</b></span>
+            </div>
             <table>
                 <thead>
                     <tr>
                         <th>Moneda</th>
-                        <th>Costat</th>
-                        <th>Entrada</th>
-                        <th>Preu Actual</th>
-                        <th>PnL No Realitzat</th>
-                        <th>Estratègia</th>
+                        <th>Preu Hyperliquid</th>
+                        <th>Preu Binance</th>
+                        <th>Spread % (HL vs BN)</th>
+                        <th>HL Fund (8h)</th>
+                        <th>BN Fund (8h)</th>
+                        <th>Dif. Funding (APR)</th>
+                        <th>Estat Senyal</th>
                     </tr>
                 </thead>
-                <tbody id="positions-body">
-                    <tr><td colspan="6" style="text-align: center; color: #64748b;">Sense posicions obertes</td></tr>
+                <tbody id="spreads-body">
+                    <tr><td colspan="8" style="text-align: center; color: #64748b;">Connectant amb els WebSockets de Hyperliquid i Binance...</td></tr>
                 </tbody>
             </table>
         </div>
 
+        <!-- Taula 2: Posicions Delta-Neutral Actives -->
         <div class="card-table">
-            <div class="table-title">Darreres 5 Minioperacions Tancades</div>
+            <div class="table-title">
+                <span>⚖️ Posicions Arbitrades Actives (Delta Neutral = 0)</span>
+                <span style="font-size: 0.8rem; font-weight: normal; color: #94a3b8;" id="pos-count">0 posicions</span>
+            </div>
             <table>
                 <thead>
                     <tr>
                         <th>Moneda</th>
-                        <th>Costat</th>
-                        <th>Entrada</th>
-                        <th>Sortida</th>
-                        <th>Motiu</th>
+                        <th>Direcció</th>
+                        <th>Pota Hyperliquid</th>
+                        <th>Pota Binance</th>
+                        <th>Delta Net</th>
+                        <th>Funding Cobrat</th>
+                        <th>PnL No Realitzat</th>
+                    </tr>
+                </thead>
+                <tbody id="positions-body">
+                    <tr><td colspan="7" style="text-align: center; color: #64748b;">Sense posicions d'arbitratge actives actualment</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Taula 3: Darreres Operacions Tancades -->
+        <div class="card-table">
+            <div class="table-title">
+                <span>📜 Darreres Operacions d'Arbitratge Tancades</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Moneda</th>
+                        <th>Direcció</th>
+                        <th>Motiu Sortida</th>
+                        <th>Spread Capturat</th>
+                        <th>Funding Net</th>
+                        <th>Comissions</th>
                         <th>PnL Net ($)</th>
                     </tr>
                 </thead>
                 <tbody id="closed-body">
-                    <tr><td colspan="6" style="text-align: center; color: #64748b;">Esperant trades...</td></tr>
+                    <tr><td colspan="7" style="text-align: center; color: #64748b;">Esperant convergències...</td></tr>
                 </tbody>
             </table>
         </div>
 
-        <div class="footer">Actualització automàtica cada 2s • Hyperliquid Multi-Strategy Bot</div>
+        <div class="footer">Actualització automàtica en viu cada 1.5s • Cross-Exchange Statistical Arbitrage Engine</div>
     </div>
 
     <script>
@@ -110,61 +162,101 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const res = await fetch('/api/status');
                 const data = await res.json();
                 
-                document.getElementById('balance').innerText = data.metrics.balance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' $';
-                
+                // Mètriques principals
+                const totalBal = (data.metrics.balance || 0);
+                document.getElementById('balance').innerText = totalBal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' $';
+                if (data.metrics.hl_balance !== undefined && data.metrics.bn_balance !== undefined) {
+                    document.getElementById('balance-sub').innerText = `HL: ${data.metrics.hl_balance.toFixed(2)}$ | BN: ${data.metrics.bn_balance.toFixed(2)}$`;
+                }
+
                 const pnlEl = document.getElementById('pnl');
-                const pnl = data.metrics.net_pnl;
-                pnlEl.innerText = (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + ' $';
+                const pnl = (data.metrics.net_pnl || 0);
+                pnlEl.innerText = (pnl >= 0 ? '+' : '') + pnl.toFixed(3) + ' $';
                 pnlEl.className = 'val ' + (pnl >= 0 ? 'green' : 'red');
+                document.getElementById('pnl-sub').innerText = `Realitzat: ${(data.metrics.realized_pnl >= 0 ? '+' : '') + (data.metrics.realized_pnl || 0).toFixed(3)}$`;
 
-                document.getElementById('winrate').innerText = data.metrics.winrate_pct.toFixed(1) + ' %';
-                document.getElementById('trades').innerText = `${data.metrics.total_trades} (${data.metrics.wins}W / ${data.metrics.losses}L)`;
-                document.getElementById('fees').innerText = data.metrics.total_fees.toFixed(4) + ' $';
-                document.getElementById('uptime').innerText = 'Temps actiu: ' + data.uptime;
+                const funding = (data.metrics.total_funding || 0);
+                document.getElementById('funding').innerText = (funding >= 0 ? '+' : '') + funding.toFixed(4) + ' $';
 
-                // Posicions
-                const posBody = document.getElementById('positions-body');
-                if (data.positions.length === 0) {
-                    posBody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #64748b;">Sense posicions obertes</td></tr>';
-                } else {
-                    posBody.innerHTML = data.positions.map(p => {
-                        const sideColor = p.side === 'BUY' ? 'green' : 'red';
-                        const pnlColor = p.unrealized_pnl >= 0 ? 'green' : 'red';
+                document.getElementById('trades').innerText = `${data.metrics.total_trades || 0} (${data.metrics.wins || 0}W / ${data.metrics.losses || 0}L)`;
+                document.getElementById('winrate-sub').innerText = `Winrate: ${(data.metrics.winrate_pct || 0).toFixed(1)}%`;
+                document.getElementById('fees').innerText = (data.metrics.total_fees || 0).toFixed(4) + ' $';
+                document.getElementById('uptime').innerText = 'Temps actiu: ' + (data.uptime || '-');
+
+                // Taula Spreads
+                const spreadsBody = document.getElementById('spreads-body');
+                if (data.spreads && data.spreads.length > 0) {
+                    spreadsBody.innerHTML = data.spreads.map(s => {
+                        const spreadVal = s.spread_pct;
+                        const spreadColor = Math.abs(spreadVal) >= 0.080 ? 'green' : 'white';
+                        let signalTag = '<span class="tag-neutral">NORMAL</span>';
+                        if (spreadVal >= 0.080) {
+                            signalTag = '<span class="tag-signal tag-buy">🔥 SELL HL / BUY BN</span>';
+                        } else if (spreadVal <= -0.080) {
+                            signalTag = '<span class="tag-signal tag-sell">🔥 BUY HL / SELL BN</span>';
+                        } else if (Math.abs(s.annual_funding_diff_apr) >= 15.0) {
+                            signalTag = '<span class="tag-signal" style="background: rgba(250, 204, 21, 0.15); color: #facc15; border: 1px solid #facc15;">💰 HARVEST APR</span>';
+                        }
+
+                        const aprColor = s.annual_funding_diff_apr > 10.0 ? 'green' : (s.annual_funding_diff_apr < -10.0 ? 'red' : '');
+
                         return `<tr>
-                            <td style="font-weight: bold; color: #facc15;">${p.coin}</td>
-                            <td class="${sideColor}" style="font-weight: bold;">${p.side}</td>
-                            <td>${p.entry_price.toFixed(2)}</td>
-                            <td>${p.current_price.toFixed(2)}</td>
-                            <td class="${pnlColor}" style="font-weight: bold;">${(p.unrealized_pnl >= 0 ? '+' : '') + p.unrealized_pnl.toFixed(3)}$ (${p.unrealized_pnl_pct.toFixed(2)}%)</td>
-                            <td style="color: #38bdf8;">${p.strategy_name}</td>
+                            <td style="font-weight: bold; color: #facc15;">${s.coin}</td>
+                            <td>${s.hl_price.toFixed(s.hl_price < 1.0 ? 4 : 2)} $</td>
+                            <td>${s.bn_price.toFixed(s.bn_price < 1.0 ? 4 : 2)} $</td>
+                            <td class="${spreadColor}" style="font-weight: bold;">${(spreadVal >= 0 ? '+' : '') + spreadVal.toFixed(4)}%</td>
+                            <td>${(s.hl_funding_8h >= 0 ? '+' : '') + s.hl_funding_8h.toFixed(4)}%</td>
+                            <td>${(s.bn_funding_8h >= 0 ? '+' : '') + s.bn_funding_8h.toFixed(4)}%</td>
+                            <td class="${aprColor}" style="font-weight: bold;">${(s.annual_funding_diff_apr >= 0 ? '+' : '') + s.annual_funding_diff_apr.toFixed(1)}%</td>
+                            <td>${signalTag}</td>
                         </tr>`;
                     }).join('');
                 }
 
-                // Tancades
-                const closedBody = document.getElementById('closed-body');
-                if (data.recent_closed.length === 0) {
-                    closedBody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #64748b;">Cap operació tancada encara</td></tr>';
-                } else {
-                    closedBody.innerHTML = data.recent_closed.slice().reverse().map(p => {
-                        const sideColor = p.side === 'BUY' ? 'green' : 'red';
-                        const pnlColor = p.realized_pnl >= 0 ? 'green' : 'red';
-                        const reasonColor = p.exit_reason === 'TAKE_PROFIT' || p.exit_reason === 'SPREAD_CAPTURED' ? 'green' : 'red';
+                // Taula Posicions Actives
+                const posBody = document.getElementById('positions-body');
+                const posCount = document.getElementById('pos-count');
+                if (data.positions && data.positions.length > 0) {
+                    posCount.innerText = `${data.positions.length} posició(ns)`;
+                    posBody.innerHTML = data.positions.map(p => {
+                        const pnlColor = p.unrealized_pnl >= 0 ? 'green' : 'red';
                         return `<tr>
                             <td style="font-weight: bold; color: #facc15;">${p.coin}</td>
-                            <td class="${sideColor}">${p.side}</td>
-                            <td>${p.entry_price.toFixed(2)}</td>
-                            <td>${p.exit_price ? p.exit_price.toFixed(2) : '-'}</td>
+                            <td style="font-weight: bold; color: #38bdf8;">${p.direction}</td>
+                            <td>${p.leg_hl.side} @ ${p.leg_hl.entry_price.toFixed(2)} (${p.leg_hl.size_usd.toFixed(0)}$)</td>
+                            <td>${p.leg_bn.side} @ ${p.leg_bn.entry_price.toFixed(2)} (${p.leg_bn.size_usd.toFixed(0)}$)</td>
+                            <td style="color: #10b981; font-weight: bold;">0.00 (Neutral)</td>
+                            <td style="color: #c084fc;">${(p.accumulated_funding >= 0 ? '+' : '') + p.accumulated_funding.toFixed(4)}$</td>
+                            <td class="${pnlColor}" style="font-weight: bold;">${(p.unrealized_pnl >= 0 ? '+' : '') + p.unrealized_pnl.toFixed(3)}$</td>
+                        </tr>`;
+                    }).join('');
+                } else {
+                    posCount.innerText = "0 posicions";
+                    posBody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b;">Sense posicions d\'arbitratge actives actualment</td></tr>';
+                }
+
+                // Taula Tancades
+                const closedBody = document.getElementById('closed-body');
+                if (data.recent_closed && data.recent_closed.length > 0) {
+                    closedBody.innerHTML = data.recent_closed.slice().reverse().map(p => {
+                        const pnlColor = p.realized_pnl >= 0 ? 'green' : 'red';
+                        const reasonColor = p.exit_reason === 'CONVERGENCE_TARGET' ? 'green' : 'yellow';
+                        return `<tr>
+                            <td style="font-weight: bold; color: #facc15;">${p.coin}</td>
+                            <td style="color: #38bdf8;">${p.direction}</td>
                             <td class="${reasonColor}" style="font-weight: bold;">${p.exit_reason}</td>
+                            <td>${p.entry_spread_pct ? p.entry_spread_pct.toFixed(3) + '%' : '-'}</td>
+                            <td style="color: #c084fc;">${(p.accumulated_funding >= 0 ? '+' : '') + (p.accumulated_funding || 0).toFixed(4)}$</td>
+                            <td>${(p.total_fees || 0).toFixed(4)}$</td>
                             <td class="${pnlColor}" style="font-weight: bold;">${(p.realized_pnl >= 0 ? '+' : '') + p.realized_pnl.toFixed(3)}$</td>
                         </tr>`;
                     }).join('');
                 }
             } catch (e) {
-                console.error(e);
+                console.error("Error actualitzant dashboard:", e);
             }
         }
-        setInterval(fetchStatus, 2000);
+        setInterval(fetchStatus, 1500);
         fetchStatus();
     </script>
 </body>
@@ -172,9 +264,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 """
 
 class WebDashboardServer:
-    def __init__(self, exchange: PaperExchange, start_time: float, port: int = 8080):
+    def __init__(self, exchange, start_time: float, port: int = 8080, app_ref=None):
         self.exchange = exchange
         self.start_time = start_time
+        self.app_ref = app_ref
         self.port = int(os.environ.get("PORT", port))
         self.app = web.Application()
         self.app.router.add_get("/", self.handle_index)
@@ -190,36 +283,60 @@ class WebDashboardServer:
         hours, mins = divmod(mins, 60)
         uptime = f"{hours:02d}h {mins:02d}m {secs:02d}s"
 
-        positions = [
-            {
-                "coin": p.coin,
-                "side": p.side.value,
-                "entry_price": p.entry_price,
-                "current_price": p.current_price,
-                "unrealized_pnl": p.unrealized_pnl,
-                "unrealized_pnl_pct": p.unrealized_pnl_pct,
-                "strategy_name": p.strategy_name,
-            }
-            for p in self.exchange.positions.values()
-        ]
+        # Si l'aplicació té motor d'arbitratge
+        spreads_data = []
+        positions_data = []
+        closed_data = []
 
-        recent_closed = [
-            {
-                "coin": p.coin,
-                "side": p.side.value,
-                "entry_price": p.entry_price,
-                "exit_price": p.exit_price,
-                "exit_reason": p.exit_reason,
-                "realized_pnl": p.realized_pnl,
-            }
-            for p in self.exchange.closed_positions[-10:]
-        ]
+        if hasattr(self.app_ref, "get_dashboard_data"):
+            data = self.app_ref.get_dashboard_data()
+            spreads_data = data.get("spreads", [])
+            positions_data = data.get("positions", [])
+            closed_data = data.get("recent_closed", [])
+            metrics = data.get("metrics", self.exchange.metrics)
+        else:
+            metrics = self.exchange.metrics
+            if hasattr(self.exchange, "active_positions"):
+                positions_data = [
+                    {
+                        "coin": p.coin,
+                        "direction": p.direction.value,
+                        "entry_spread_pct": p.entry_spread_pct,
+                        "current_spread_pct": p.current_spread_pct,
+                        "unrealized_pnl": p.unrealized_pnl,
+                        "accumulated_funding": p.accumulated_funding,
+                        "leg_hl": {
+                            "side": p.leg_hl.side.value,
+                            "entry_price": p.leg_hl.entry_price,
+                            "size_usd": p.leg_hl.size_usd,
+                        },
+                        "leg_bn": {
+                            "side": p.leg_bn.side.value,
+                            "entry_price": p.leg_bn.entry_price,
+                            "size_usd": p.leg_bn.size_usd,
+                        },
+                    }
+                    for p in self.exchange.active_positions.values()
+                ]
+                closed_data = [
+                    {
+                        "coin": p.coin,
+                        "direction": p.direction.value,
+                        "exit_reason": p.exit_reason,
+                        "entry_spread_pct": p.entry_spread_pct,
+                        "accumulated_funding": p.accumulated_funding,
+                        "total_fees": p.total_fees,
+                        "realized_pnl": p.realized_pnl,
+                    }
+                    for p in self.exchange.closed_positions[-15:]
+                ]
 
         return web.json_response({
             "uptime": uptime,
-            "metrics": self.exchange.metrics,
-            "positions": positions,
-            "recent_closed": recent_closed,
+            "metrics": metrics,
+            "spreads": spreads_data,
+            "positions": positions_data,
+            "recent_closed": closed_data,
         })
 
     async def start(self):

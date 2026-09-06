@@ -1,4 +1,4 @@
-"""Orquestrador principal del Bot d'Hyperliquid (Paper Trading & Multi-Estratègia)."""
+"""Orquestrador principal del Bot: Arbitratge Delta-Neutral i Scalper."""
 
 import argparse
 import asyncio
@@ -6,40 +6,284 @@ import logging
 import signal
 import sys
 import time
-from typing import Dict, List
-
+from typing import Dict, List, Optional
+import aiohttp
 from rich.console import Console
 from rich.live import Live
 
 from config.settings import config
+from core.arbitrage_models import ArbitrageDirection, ArbitragePosition, ArbitrageSignal
+from core.arbitrage_paper_exchange import ArbitragePaperExchange
+from core.binance_ws_client import BinanceFuturesWSClient, get_ssl_context
 from core.models import OrderBookL2, OrderSide, Signal, Trade
 from core.paper_exchange import PaperExchange
 from core.risk_manager import RiskManager
+from core.web_server import WebDashboardServer
 from core.ws_client import HyperliquidWSClient
 from strategies.base_strategy import BaseStrategy
+from strategies.cross_arbitrage import CrossExchangeArbitrageStrategy
 from strategies.micro_mean_reversion import MicroMeanReversionStrategy
 from strategies.orderbook_imbalance import OrderBookImbalanceStrategy
 from strategies.spread_scalper import SpreadMarketMakerStrategy
 from strategies.volume_burst import VolumeBurstStrategy
-from ui.dashboard import generate_dashboard
-from core.web_server import WebDashboardServer
+from ui.dashboard import generate_arbitrage_dashboard, generate_dashboard
 
-# Configuració de logging (desat a fitxer per no trencar el dashboard Rich a la terminal)
 logging.basicConfig(
     filename="trading_bot.log",
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 logger = logging.getLogger("Main")
 console = Console()
 
-class TradingBotApp:
+class ArbitrageTradingBotApp:
+    def __init__(
+        self,
+        coins: List[str],
+        min_spread: float = 0.080,
+        exit_spread: float = 0.015,
+        size_usd: float = 1000.0,
+        headless: bool = False,
+    ):
+        self.coins = coins
+        self.size_usd = size_usd
+        self.headless = headless
+        self.start_time = time.time()
+
+        self.exchange = ArbitragePaperExchange(
+            initial_hl_balance=5000.0,
+            initial_bn_balance=5000.0,
+            on_open_cb=self._on_pair_open,
+            on_close_cb=self._on_pair_close,
+        )
+        self.strategy = CrossExchangeArbitrageStrategy(
+            min_entry_spread_pct=min_spread,
+            target_exit_spread_pct=exit_spread,
+        )
+        self.hl_ws = HyperliquidWSClient(
+            coins=self.coins,
+            on_book_update=self.handle_hl_book,
+        )
+        self.bn_ws = BinanceFuturesWSClient(
+            coins=self.coins,
+            on_book_update=self.handle_bn_book,
+            on_funding_update=self.handle_bn_funding,
+        )
+        self.web_server = WebDashboardServer(
+            exchange=self.exchange,
+            start_time=self.start_time,
+            app_ref=self,
+        )
+        self.is_running = False
+        self._sync_task: Optional[asyncio.Task] = None
+        self._funding_accrual_task: Optional[asyncio.Task] = None
+
+    def _on_pair_open(self, pos: ArbitragePosition):
+        if self.headless:
+            print(
+                f"  ⚡ [ARB OBERT] {pos.coin} {pos.direction.value} | "
+                f"HL: {pos.leg_hl.entry_price:.2f} ({pos.leg_hl.side.value}) | "
+                f"BN: {pos.leg_bn.entry_price:.2f} ({pos.leg_bn.side.value}) | "
+                f"Spread: {pos.entry_spread_pct:+.3f}% | Mida: {pos.leg_hl.size_usd:.0f}$ x 2"
+            )
+
+    def _on_pair_close(self, pos: ArbitragePosition, exit_reason: str, net_pnl: float):
+        if self.headless:
+            icon = "✅" if net_pnl > 0 else "❌"
+            res_str = "GUANY" if net_pnl > 0 else "PÈRDUA"
+            print(
+                f"  {icon} [ARB TANCAT {exit_reason}] {pos.coin} | {res_str}: {net_pnl:+.3f}$ | "
+                f"Funding: {pos.accumulated_funding:+.4f}$ | Comissions: {pos.total_fees:.4f}$ | "
+                f"Balanç Total: {self.exchange.total_balance_usd:.2f}$"
+            )
+
+    def handle_hl_book(self, book: OrderBookL2):
+        self.strategy.update_hl_book(book)
+        self.exchange.on_hl_book(book)
+        self._check_coin_state(book.coin)
+
+    def handle_bn_book(self, book: OrderBookL2):
+        self.strategy.update_bn_book(book)
+        self.exchange.on_bn_book(book)
+        self._check_coin_state(book.coin)
+
+    def handle_bn_funding(self, funding_dict: Dict[str, float]):
+        self.strategy.update_bn_funding(funding_dict)
+
+    def _check_coin_state(self, coin: str):
+        # 1. Comprova tancaments de posicions obertes
+        for pos in list(self.exchange.active_positions.values()):
+            if pos.coin == coin:
+                exit_eval = self.strategy.check_exit(pos)
+                if exit_eval:
+                    reason, hl_px, bn_px = exit_eval
+                    self.exchange.close_arbitrage_position(
+                        pair_id=pos.pair_id,
+                        hl_exit_price=hl_px,
+                        bn_exit_price=bn_px,
+                        reason=reason,
+                        is_maker=False,
+                    )
+
+        # 2. Avalua noves oportunitats d'entrada si no tenim posició en aquest parell
+        if not self.exchange.has_open_position(coin) and len(self.exchange.active_positions) < 3:
+            sig = self.strategy.evaluate_entry(coin)
+            if sig:
+                self.exchange.open_arbitrage_position(sig, size_usd=self.size_usd, is_maker=False)
+
+    async def _run_hl_meta_sync_loop(self):
+        """Sincronitza Funding Rates oficials de Hyperliquid cada 30 segons."""
+        ssl_ctx = get_ssl_context()
+        while self.is_running:
+            try:
+                connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    url = "https://api.hyperliquid.xyz/info"
+                    payload = {"type": "metaAndAssetCtxs"}
+                    async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=6.0)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            universe = data[0]["universe"]
+                            asset_ctxs = data[1]
+                            for i, meta in enumerate(universe):
+                                c = meta["name"]
+                                if c in self.coins:
+                                    funding_h = float(asset_ctxs[i]["funding"]) * 100.0
+                                    self.strategy.update_hl_funding(c, funding_h)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Error sincronitzant meta Hyperliquid: {e}")
+
+            await asyncio.sleep(30.0)
+
+    async def _run_hourly_funding_loop(self):
+        """Simula l'acreditació de funding cada 1 hora per a posicions mantingudes."""
+        while self.is_running:
+            await asyncio.sleep(3600.0)
+            for coin in self.coins:
+                hl_f = self.strategy.hl_funding_hourly_pct.get(coin, 0.0)
+                bn_f = self.strategy.bn_funding_8h_pct.get(coin, 0.0)
+                self.exchange.apply_hourly_funding(coin, hl_f, bn_f)
+
+    def get_dashboard_data(self) -> dict:
+        spreads = []
+        for coin in self.coins:
+            info = self.strategy.calculate_spread_info(coin)
+            if info:
+                spread_val = info.spread_sell_hl_buy_bn_pct if abs(info.spread_sell_hl_buy_bn_pct) >= abs(info.spread_buy_hl_sell_bn_pct) else -info.spread_buy_hl_sell_bn_pct
+                spreads.append({
+                    "coin": coin,
+                    "hl_price": info.hl_mid,
+                    "bn_price": info.bn_mid,
+                    "spread_pct": spread_val,
+                    "hl_funding_8h": info.hl_funding_8h_pct,
+                    "bn_funding_8h": info.bn_funding_8h_pct,
+                    "annual_funding_diff_apr": info.annual_funding_diff_apr,
+                })
+        positions = [
+            {
+                "coin": p.coin,
+                "direction": p.direction.value,
+                "entry_spread_pct": p.entry_spread_pct,
+                "current_spread_pct": p.current_spread_pct,
+                "unrealized_pnl": p.unrealized_pnl,
+                "accumulated_funding": p.accumulated_funding,
+                "leg_hl": {
+                    "side": p.leg_hl.side.value,
+                    "entry_price": p.leg_hl.entry_price,
+                    "size_usd": p.leg_hl.size_usd,
+                },
+                "leg_bn": {
+                    "side": p.leg_bn.side.value,
+                    "entry_price": p.leg_bn.entry_price,
+                    "size_usd": p.leg_bn.size_usd,
+                },
+            }
+            for p in self.exchange.active_positions.values()
+        ]
+        recent_closed = [
+            {
+                "coin": p.coin,
+                "direction": p.direction.value,
+                "exit_reason": p.exit_reason,
+                "entry_spread_pct": p.entry_spread_pct,
+                "accumulated_funding": p.accumulated_funding,
+                "total_fees": p.total_fees,
+                "realized_pnl": p.realized_pnl,
+            }
+            for p in self.exchange.closed_positions[-15:]
+        ]
+        return {
+            "metrics": self.exchange.metrics,
+            "spreads": spreads,
+            "positions": positions,
+            "recent_closed": recent_closed,
+        }
+
+    async def run(self, duration_sec: int = 0):
+        self.is_running = True
+        await self.hl_ws.start()
+        await self.bn_ws.start()
+        await self.web_server.start()
+        self._sync_task = asyncio.create_task(self._run_hl_meta_sync_loop())
+        self._funding_accrual_task = asyncio.create_task(self._run_hourly_funding_loop())
+
+        try:
+            if not self.headless:
+                with Live(generate_arbitrage_dashboard(self, self.start_time), refresh_per_second=3, console=console) as live:
+                    while self.is_running:
+                        await asyncio.sleep(0.33)
+                        live.update(generate_arbitrage_dashboard(self, self.start_time))
+                        if duration_sec > 0 and (time.time() - self.start_time) >= duration_sec:
+                            break
+            else:
+                print(f"Bot d'Arbitratge Delta-Neutral en marxa (Headless). Monitoritzant {self.coins}...")
+                while self.is_running:
+                    await asyncio.sleep(1.0)
+                    if duration_sec > 0 and (time.time() - self.start_time) >= duration_sec:
+                        break
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            pass
+        finally:
+            await self.shutdown()
+
+    async def shutdown(self):
+        self.is_running = False
+        for t in (self._sync_task, self._funding_accrual_task):
+            if t:
+                t.cancel()
+        await self.web_server.stop()
+        await self.hl_ws.stop()
+        await self.bn_ws.stop()
+        self.print_summary()
+
+    def print_summary(self):
+        console.print("\n[bold cyan]═══ RESUM FINAL SESSIÓ ARBITRATGE DELTA-NEUTRAL ═══[/bold cyan]")
+        m = self.exchange.metrics
+        pnl = m["net_pnl"]
+        pnl_color = "green" if pnl >= 0 else "red"
+        console.print(f"Balanç Inicial: [white]{m['initial_balance']:,.2f}$[/white]")
+        console.print(f"Balanç Final:   [white]{m['balance']:,.2f}$[/white] (HL: {m['hl_balance']:,.2f}$ | BN: {m['bn_balance']:,.2f}$)")
+        console.print(f"PnL Net Total:  [{pnl_color}]{pnl:+,.3f}$[/]")
+        console.print(f"Funding Cobrat: [bold green]{m['total_funding']:+,.4f}$[/bold green]")
+        console.print(f"Total Trades:   {m['total_trades']} (Guanyats: {m['wins']}, Perduts: {m['losses']})")
+        console.print(f"Winrate:        [bold]{m['winrate_pct']:.1f}%[/bold]")
+        console.print(f"Comissions:     [magenta]{m['total_fees']:.4f}$[/magenta]")
+
+
+class DirectionalScalperApp:
     def __init__(self, coins: List[str], strategies: List[BaseStrategy], headless: bool = False):
         self.coins = coins
         self.strategies = strategies
         self.headless = headless
         self.start_time = time.time()
-        
+
         self.exchange = PaperExchange(
             initial_balance=config.initial_balance_usd,
             on_fill_cb=self._on_exchange_fill,
@@ -47,7 +291,7 @@ class TradingBotApp:
         )
         self.risk_manager = RiskManager()
         self.books: Dict[str, OrderBookL2] = {}
-        
+
         self.ws_client = HyperliquidWSClient(
             coins=self.coins,
             on_book_update=self.handle_book_update,
@@ -70,11 +314,8 @@ class TradingBotApp:
 
     def handle_book_update(self, book: OrderBookL2):
         self.books[book.coin] = book
-
-        # 1. Actualitza preus i comprova TP/SL al simulador
         self.exchange.on_book_update(book)
 
-        # 2. Comprova tancament per temps de seguretat (Time-Exits)
         expired_coins = self.risk_manager.check_time_exits(self.exchange.positions, self.books)
         for coin in expired_coins:
             if coin in self.books and self.books[coin].mid_price:
@@ -85,17 +326,13 @@ class TradingBotApp:
                     is_maker=True,
                 )
 
-        # 3. Executa les estratègies basades en book
         for strat in self.strategies:
             sig = strat.on_book_update(book)
             if sig:
                 self._process_signal(sig, book)
 
     def handle_trade_update(self, trade: Trade):
-        # 1. Avança cues del simulador d'ordres límit
         self.exchange.on_trade(trade)
-
-        # 2. Executa les estratègies basades en flux de trades
         for strat in self.strategies:
             sig = strat.on_trade(trade)
             if sig and trade.coin in self.books:
@@ -112,11 +349,10 @@ class TradingBotApp:
         )
 
         if not can_open:
-            logger.debug(f"[SENYAL REBUTJAT PER RISC] {sig.coin} {sig.action} de {sig.strategy_name}: {reason}")
             return
 
         side = OrderSide.BUY if sig.action == "BUY" else OrderSide.SELL
-        order = self.exchange.place_order(
+        self.exchange.place_order(
             coin=sig.coin,
             side=side,
             price=sig.price,
@@ -127,9 +363,6 @@ class TradingBotApp:
             take_profit=sig.take_profit,
             stop_loss=sig.stop_loss,
         )
-
-        if order and self.headless:
-            print(f"[{sig.strategy_name}] Ordre enviada: {side.value} {sig.coin} @ {sig.price:.2f} ({sig.reason})")
 
     async def run(self, duration_sec: int = 0):
         self.is_running = True
@@ -146,12 +379,11 @@ class TradingBotApp:
                         if duration_sec > 0 and (time.time() - self.start_time) >= duration_sec:
                             break
             else:
-                print(f"Bot iniciat en mode Headless. Monitoritzant {self.coins}...")
+                print(f"Scalper iniciat en mode Headless. Monitoritzant {self.coins}...")
                 while self.is_running:
                     await asyncio.sleep(1.0)
                     if duration_sec > 0 and (time.time() - self.start_time) >= duration_sec:
                         break
-
         except (asyncio.CancelledError, KeyboardInterrupt):
             pass
         finally:
@@ -161,63 +393,42 @@ class TradingBotApp:
         self.is_running = False
         await self.web_server.stop()
         await self.ws_client.stop()
-        self.print_summary()
-
-    def print_summary(self):
-        console.print("\n[bold cyan]═══ RESUM FINAL DE LA SESSIÓ DE TRADING ═══[/bold cyan]")
-        metrics = self.exchange.metrics
-        pnl = metrics["net_pnl"]
-        pnl_color = "green" if pnl >= 0 else "red"
-        
-        console.print(f"Balanç Inicial: [white]{self.exchange.initial_balance:,.2f}$[/white]")
-        console.print(f"Balanç Final:   [white]{metrics['balance']:,.2f}$[/white]")
-        console.print(f"PnL Net Total:  [{pnl_color}]{pnl:+,.3f}$[/]")
-        console.print(f"Total Operacions: {metrics['total_trades']} (Guanyades: {metrics['wins']}, Perdudes: {metrics['losses']})")
-        console.print(f"Taxa d'Èxit (Winrate): [bold]{metrics['winrate_pct']:.2f}%[/bold]")
-        console.print(f"Profit Factor: {metrics['profit_factor']:.2f}")
-        console.print(f"Total Comissions: [magenta]{metrics['total_fees']:.4f}$[/magenta] (Maker: {metrics['maker_ratio_pct']:.1f}%)")
-        
-        # Desglossament per estratègies
-        console.print("\n[bold]Rendiment per Estratègia:[/bold]")
-        for strat in self.strategies:
-            strat_trades = [p for p in self.exchange.closed_positions if p.strategy_name == strat.name]
-            s_wins = len([p for p in strat_trades if p.realized_pnl > 0])
-            s_pnl = sum(p.realized_pnl for p in strat_trades)
-            s_wr = (s_wins / len(strat_trades) * 100.0) if strat_trades else 0.0
-            console.print(f" • {strat.name:15}: {len(strat_trades)} trades | Winrate: {s_wr:5.1f}% | PnL: {s_pnl:+,.3f}$ | Senyals: {strat.signals_count}")
-
-        if self.exchange.positions:
-            console.print("\n[bold yellow]Posicions obertes en curs en aturar la sessió:[/bold yellow]")
-            for coin, pos in self.exchange.positions.items():
-                pnl_color = "green" if pos.unrealized_pnl >= 0 else "red"
-                console.print(
-                    f" • [{pos.side.value}] {pos.coin} @ {pos.entry_price:,.2f} "
-                    f"| Mida: {pos.size_usd:.1f}$ | TP: {pos.take_profit:,.2f} | SL: {pos.stop_loss:,.2f} "
-                    f"| PnL No Realitzat: [{pnl_color}]{pos.unrealized_pnl:+.3f}$ ({pos.unrealized_pnl_pct:+.2f}%)[/{pnl_color}]"
-                )
 
 def main():
-    parser = argparse.ArgumentParser(description="Hyperliquid High-Frequency Scalping Bot")
-    parser.add_argument("--coins", nargs="+", default=["BTC"], help="Monedes a operar (ex: BTC)")
+    parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + Binance)")
+    parser.add_argument("--mode", choices=["arbitrage", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (recomanat) o 'scalper'")
+    parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL LINK NEAR SUI DOGE)")
+    parser.add_argument("--min-spread", type=float, default=0.080, help="Spread mínim percentual d'entrada per a l'arbitratge (default: 0.080%%)")
+    parser.add_argument("--exit-spread", type=float, default=0.015, help="Spread màxim percentual de sortida/convergència (default: 0.015%%)")
+    parser.add_argument("--size", type=float, default=1000.0, help="Mida en dòlars per ordre/pota")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
-    parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich (només logs)")
-    parser.add_argument("--no-burst", action="store_true", help="Desactivar Volume Burst (recomanat)")
-    parser.add_argument("--maker-only", action="store_true", help="Executar només l'estratègia de captura de spread")
+    parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
+    parser.add_argument("--no-burst", action="store_true", help="Desactivar Volume Burst (només scalper)")
+    parser.add_argument("--maker-only", action="store_true", help="Només maker (només scalper)")
     args = parser.parse_args()
 
-    # Instanciació de les estratègies
-    if args.maker_only:
-        strategies: List[BaseStrategy] = [SpreadMarketMakerStrategy()]
+    if args.mode == "arbitrage":
+        coins = args.coins or ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
+        app = ArbitrageTradingBotApp(
+            coins=coins,
+            min_spread=args.min_spread,
+            exit_spread=args.exit_spread,
+            size_usd=args.size,
+            headless=args.headless,
+        )
     else:
-        strategies: List[BaseStrategy] = [
-            SpreadMarketMakerStrategy(),
-            OrderBookImbalanceStrategy(),
-            MicroMeanReversionStrategy(),
-        ]
-        if not args.no_burst:
-            strategies.append(VolumeBurstStrategy())
-
-    app = TradingBotApp(coins=args.coins, strategies=strategies, headless=args.headless)
+        coins = args.coins or ["BTC"]
+        if args.maker_only:
+            strategies: List[BaseStrategy] = [SpreadMarketMakerStrategy()]
+        else:
+            strategies: List[BaseStrategy] = [
+                SpreadMarketMakerStrategy(),
+                OrderBookImbalanceStrategy(),
+                MicroMeanReversionStrategy(),
+            ]
+            if not args.no_burst:
+                strategies.append(VolumeBurstStrategy())
+        app = DirectionalScalperApp(coins=coins, strategies=strategies, headless=args.headless)
 
     def handle_sigint(sig, frame):
         print("\nSenyal d'aturada rebut. Tancant connexions...")

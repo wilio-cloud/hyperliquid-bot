@@ -1,0 +1,185 @@
+"""Estratègia d'Arbitratge Delta-Neutral Creuat (Hyperliquid vs Binance Futures)."""
+
+import logging
+import time
+from typing import Dict, List, Optional, Tuple
+
+from core.arbitrage_models import (
+    ArbitrageDirection,
+    ArbitragePosition,
+    ArbitrageSignal,
+    CrossSpreadInfo,
+)
+from core.models import OrderBookL2
+
+logger = logging.getLogger("CrossArbitrage")
+
+class CrossExchangeArbitrageStrategy:
+    def __init__(
+        self,
+        min_entry_spread_pct: float = 0.080,  # Dislocació mínima per obrir (+0.080%)
+        target_exit_spread_pct: float = 0.015,  # Convergència de sortida (<= +0.015%)
+        stop_loss_spread_pct: float = 0.35,     # Stop per divergència anòmala (>= 0.35%)
+        max_hold_seconds: int = 14400,          # 4 hores màxim per posició
+    ):
+        self.name = "CROSS_ARBITRAGE"
+        self.min_entry_spread_pct = min_entry_spread_pct
+        self.target_exit_spread_pct = target_exit_spread_pct
+        self.stop_loss_spread_pct = stop_loss_spread_pct
+        self.max_hold_seconds = max_hold_seconds
+
+        self.hl_books: Dict[str, OrderBookL2] = {}
+        self.bn_books: Dict[str, OrderBookL2] = {}
+        
+        # Funding rates: HL en hourly (ex: 0.00125%), BN en 8h (ex: 0.0100%)
+        self.hl_funding_hourly_pct: Dict[str, float] = {}
+        self.bn_funding_8h_pct: Dict[str, float] = {}
+
+        self.signals_count = 0
+
+    def update_hl_book(self, book: OrderBookL2):
+        self.hl_books[book.coin] = book
+
+    def update_bn_book(self, book: OrderBookL2):
+        self.bn_books[book.coin] = book
+
+    def update_hl_funding(self, coin: str, funding_hourly_pct: float):
+        self.hl_funding_hourly_pct[coin] = funding_hourly_pct
+
+    def update_bn_funding(self, funding_dict: Dict[str, float]):
+        self.bn_funding_8h_pct.update(funding_dict)
+
+    def calculate_spread_info(self, coin: str) -> Optional[CrossSpreadInfo]:
+        """Calcula l'estat del spread de llibre encreuat i diferència de funding."""
+        hl_book = self.hl_books.get(coin)
+        bn_book = self.bn_books.get(coin)
+        if not hl_book or not bn_book:
+            return None
+
+        hl_bid, hl_ask = hl_book.best_bid, hl_book.best_ask
+        bn_bid, bn_ask = bn_book.best_bid, bn_book.best_ask
+        if not (hl_bid and hl_ask and bn_bid and bn_ask):
+            return None
+
+        hl_mid = (hl_bid + hl_ask) / 2.0
+        bn_mid = (bn_bid + bn_ask) / 2.0
+        global_mid = (hl_mid + bn_mid) / 2.0
+        if global_mid <= 0:
+            return None
+
+        # Cas 1: Preu HL > BN -> Venem a Bid HL i comprem a Ask BN
+        spread_sell_hl_buy_bn = ((hl_bid - bn_ask) / global_mid) * 100.0
+
+        # Cas 2: Preu BN > HL -> Venem a Bid BN i comprem a Ask HL
+        spread_buy_hl_sell_bn = ((bn_bid - hl_ask) / global_mid) * 100.0
+
+        hl_fund_h = self.hl_funding_hourly_pct.get(coin, 0.0)
+        bn_fund_8h = self.bn_funding_8h_pct.get(coin, 0.0)
+        
+        # Càlcul de rendiment anualitzat (APR) de la diferència de funding
+        hl_apr = hl_fund_h * 24.0 * 365.0
+        bn_apr = (bn_fund_8h / 8.0) * 24.0 * 365.0
+        annual_diff_apr = hl_apr - bn_apr
+
+        return CrossSpreadInfo(
+            coin=coin,
+            hl_bid=hl_bid,
+            hl_ask=hl_ask,
+            bn_bid=bn_bid,
+            bn_ask=bn_ask,
+            hl_mid=hl_mid,
+            bn_mid=bn_mid,
+            spread_sell_hl_buy_bn_pct=spread_sell_hl_buy_bn,
+            spread_buy_hl_sell_bn_pct=spread_buy_hl_sell_bn,
+            hl_funding_8h_pct=hl_fund_h * 8.0,
+            bn_funding_8h_pct=bn_fund_8h,
+            annual_funding_diff_apr=annual_diff_apr,
+            timestamp=time.time(),
+        )
+
+    def evaluate_entry(self, coin: str) -> Optional[ArbitrageSignal]:
+        """Avalua si el spread entre HL i BN supera el llindar d'entrada rendible."""
+        info = self.calculate_spread_info(coin)
+        if not info:
+            return None
+
+        # Cas 1: Preu HL supera BN
+        if info.spread_sell_hl_buy_bn_pct >= self.min_entry_spread_pct:
+            self.signals_count += 1
+            return ArbitrageSignal(
+                coin=coin,
+                direction=ArbitrageDirection.SELL_HL_BUY_BN,
+                hl_price=info.hl_bid,
+                bn_price=info.bn_ask,
+                spread_pct=info.spread_sell_hl_buy_bn_pct,
+                hl_funding_8h_pct=info.hl_funding_8h_pct,
+                bn_funding_8h_pct=info.bn_funding_8h_pct,
+                net_funding_apr=info.annual_funding_diff_apr,
+                reason=f"Spread HL>BN: {info.spread_sell_hl_buy_bn_pct:+.3f}% >= {self.min_entry_spread_pct:.3f}% (APR Dif: {info.annual_funding_diff_apr:+.1f}%)",
+            )
+
+        # Cas 2: Preu BN supera HL
+        if info.spread_buy_hl_sell_bn_pct >= self.min_entry_spread_pct:
+            self.signals_count += 1
+            return ArbitrageSignal(
+                coin=coin,
+                direction=ArbitrageDirection.BUY_HL_SELL_BN,
+                hl_price=info.hl_ask,
+                bn_price=info.bn_bid,
+                spread_pct=info.spread_buy_hl_sell_bn_pct,
+                hl_funding_8h_pct=info.hl_funding_8h_pct,
+                bn_funding_8h_pct=info.bn_funding_8h_pct,
+                net_funding_apr=-info.annual_funding_diff_apr,
+                reason=f"Spread BN>HL: {info.spread_buy_hl_sell_bn_pct:+.3f}% >= {self.min_entry_spread_pct:.3f}% (APR Dif: {-info.annual_funding_diff_apr:+.1f}%)",
+            )
+
+        return None
+
+    def check_exit(self, pos: ArbitragePosition) -> Optional[Tuple[str, float, float]]:
+        """
+        Comprova si una posició activa ha assolit la convergència o el límit de temps.
+        Retorna (motiu, preu_sortida_hl, preu_sortida_bn) si s'ha de tancar.
+        """
+        hl_book = self.hl_books.get(pos.coin)
+        bn_book = self.bn_books.get(pos.coin)
+        if not hl_book or not bn_book or not (hl_book.best_bid and hl_book.best_ask and bn_book.best_bid and bn_book.best_ask):
+            return None
+
+        global_mid = (hl_book.mid_price + bn_book.mid_price) / 2.0
+
+        if pos.direction == ArbitrageDirection.SELL_HL_BUY_BN:
+            # Entrada: Venem HL (bid), Comprem BN (ask).
+            # Sortida: Comprem HL (ask), Venem BN (bid).
+            hl_exit_px = hl_book.best_ask
+            bn_exit_px = bn_book.best_bid
+            # El spread actual per desfer la posició:
+            current_spread_to_close = ((hl_exit_px - bn_exit_px) / global_mid) * 100.0
+            pos.current_spread_pct = current_spread_to_close
+
+            # Convergència reeixida (els preus han tornat a alinear-se)
+            if current_spread_to_close <= self.target_exit_spread_pct:
+                return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
+
+            # Stop loss per divergència crítica
+            if current_spread_to_close >= self.stop_loss_spread_pct:
+                return ("STOP_LOSS_DIVERGENCE", hl_exit_px, bn_exit_px)
+
+        else:  # BUY_HL_SELL_BN
+            # Entrada: Comprem HL (ask), Venem BN (bid).
+            # Sortida: Venem HL (bid), Comprem BN (ask).
+            hl_exit_px = hl_book.best_bid
+            bn_exit_px = bn_book.best_ask
+            current_spread_to_close = ((bn_exit_px - hl_exit_px) / global_mid) * 100.0
+            pos.current_spread_pct = current_spread_to_close
+
+            if current_spread_to_close <= self.target_exit_spread_pct:
+                return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
+
+            if current_spread_to_close >= self.stop_loss_spread_pct:
+                return ("STOP_LOSS_DIVERGENCE", hl_exit_px, bn_exit_px)
+
+        # Límit de temps de seguretat
+        if (time.time() - pos.entry_time) >= self.max_hold_seconds:
+            return ("TIME_LIMIT", hl_exit_px, bn_exit_px)
+
+        return None

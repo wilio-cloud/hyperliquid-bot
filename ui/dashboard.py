@@ -153,3 +153,105 @@ def generate_dashboard(
             )
 
     return Group(header_panel, market_table, pos_table, closed_table)
+
+def generate_arbitrage_dashboard(app, start_time: float) -> Group:
+    elapsed = int(time.time() - start_time)
+    mins, secs = divmod(elapsed, 60)
+    hours, mins = divmod(mins, 60)
+    time_str = f"{hours:02d}:{mins:02d}:{secs:02d}"
+
+    metrics = app.exchange.metrics
+    pnl = metrics["net_pnl"]
+    pnl_color = "green" if pnl >= 0 else "red"
+
+    # 1. Header
+    header_text = Text()
+    header_text.append(" ARBITRATGE DELTA-NEUTRAL (Hyperliquid DEX vs Binance Futures) ", style="bold white on dark_green")
+    header_text.append(f"  [0% RISC DIRECCIONAL]  Temps: {time_str}\n\n", style="bold cyan")
+
+    header_text.append("Balanç Total: ", style="bold")
+    header_text.append(f"{metrics['balance']:,.2f}$ ", style="bold white")
+    header_text.append(f"(HL: {metrics['hl_balance']:,.2f}$ | BN: {metrics['bn_balance']:,.2f}$)   ", style="dim")
+    header_text.append("PnL Net: ", style="bold")
+    header_text.append(f"{pnl:+,.3f}$   ", style=f"bold {pnl_color}")
+    header_text.append("Funding Cobrat: ", style="bold")
+    header_text.append(f"{metrics['total_funding']:+,.4f}$   ", style="bold green")
+    header_text.append("Trades: ", style="bold")
+    header_text.append(f"{metrics['total_trades']} (W: {metrics['wins']} / L: {metrics['losses']})   ", style="white")
+    header_text.append("Winrate: ", style="bold")
+    header_text.append(f"{metrics['winrate_pct']:.1f}%   ", style="bold green" if metrics['winrate_pct'] >= 50 else "yellow")
+    header_text.append("Comissions: ", style="bold")
+    header_text.append(f"{metrics['total_fees']:.4f}$", style="bold magenta")
+
+    header_panel = Panel(header_text, border_style="green", title="Resum Arbitratge")
+
+    # 2. Taula Spreads en viu
+    spreads_table = Table(title="Spreads i Funding en Temps Real (Hyperliquid vs Binance)", expand=True)
+    spreads_table.add_column("Moneda", style="bold yellow", justify="center")
+    spreads_table.add_column("Preu HL ($)", justify="right")
+    spreads_table.add_column("Preu BN ($)", justify="right")
+    spreads_table.add_column("Spread %", justify="right", style="bold")
+    spreads_table.add_column("HL Fund (8h)", justify="right")
+    spreads_table.add_column("BN Fund (8h)", justify="right")
+    spreads_table.add_column("Dif. Funding APR", justify="right", style="bold")
+    spreads_table.add_column("Estat Senyal", justify="center")
+
+    for coin in app.coins:
+        info = app.strategy.calculate_spread_info(coin)
+        if not info:
+            continue
+        spread_val = info.spread_sell_hl_buy_bn_pct if abs(info.spread_sell_hl_buy_bn_pct) >= abs(info.spread_buy_hl_sell_bn_pct) else -info.spread_buy_hl_sell_bn_pct
+        spread_style = "bold green" if abs(spread_val) >= 0.080 else "white"
+        
+        if spread_val >= 0.080:
+            sig_txt = "[bold green]🔥 SELL HL / BUY BN[/]"
+        elif spread_val <= -0.080:
+            sig_txt = "[bold green]🔥 BUY HL / SELL BN[/]"
+        elif abs(info.annual_funding_diff_apr) >= 15.0:
+            sig_txt = "[bold yellow]💰 HARVEST APR[/]"
+        else:
+            sig_txt = "[dim]NORMAL[/]"
+
+        apr_style = "green" if info.annual_funding_diff_apr > 10.0 else ("red" if info.annual_funding_diff_apr < -10.0 else "dim")
+
+        px_fmt = "{:,.4f}" if info.hl_mid < 1.0 else ("{:,.2f}" if info.hl_mid < 1000.0 else "{:,.1f}")
+
+        spreads_table.add_row(
+            coin,
+            px_fmt.format(info.hl_mid),
+            px_fmt.format(info.bn_mid),
+            f"[{spread_style}]{spread_val:+.4f}%[/{spread_style}]",
+            f"{info.hl_funding_8h_pct:+.4f}%",
+            f"{info.bn_funding_8h_pct:+.4f}%",
+            f"[{apr_style}]{info.annual_funding_diff_apr:+.1f}%[/{apr_style}]",
+            sig_txt,
+        )
+
+    # 3. Taula Posicions Actives
+    pos_table = Table(title="Posicions Arbitrades Actives (Delta = 0)", expand=True)
+    pos_table.add_column("ID Parell", style="dim", justify="center")
+    pos_table.add_column("Moneda", style="bold yellow")
+    pos_table.add_column("Direcció", justify="center", style="bold cyan")
+    pos_table.add_column("Pota Hyperliquid", justify="right")
+    pos_table.add_column("Pota Binance", justify="right")
+    pos_table.add_column("Delta", justify="center", style="bold green")
+    pos_table.add_column("Funding Cobrat", justify="right", style="purple")
+    pos_table.add_column("PnL No Realitzat", justify="right", style="bold")
+
+    if not app.exchange.active_positions:
+        pos_table.add_row("-", "Sense posicions actives", "-", "-", "-", "-", "-", "-")
+    else:
+        for pos in app.exchange.active_positions.values():
+            pnl_style = "green" if pos.unrealized_pnl >= 0 else "red"
+            pos_table.add_row(
+                pos.pair_id,
+                pos.coin,
+                pos.direction.value,
+                f"{pos.leg_hl.side.value} @ {pos.leg_hl.entry_price:.2f} ({pos.leg_hl.size_usd:.0f}$)",
+                f"{pos.leg_bn.side.value} @ {pos.leg_bn.entry_price:.2f} ({pos.leg_bn.size_usd:.0f}$)",
+                "0.00 (Neutral)",
+                f"{pos.accumulated_funding:+.4f}$",
+                f"[{pnl_style}]{pos.unrealized_pnl:+.3f}$[/{pnl_style}]",
+            )
+
+    return Group(header_panel, spreads_table, pos_table)
