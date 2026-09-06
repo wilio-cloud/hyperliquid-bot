@@ -74,6 +74,7 @@ class ArbitragePosition(BaseModel):
     is_closed: bool = False
     exit_time: Optional[float] = None
     exit_reason: Optional[str] = None
+    divergence_start_time: Optional[float] = None
 
     def update_pnl(self):
         """Actualitza el PnL combinat de totes dues potes i afegeix funding."""

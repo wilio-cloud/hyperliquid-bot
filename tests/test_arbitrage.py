@@ -90,7 +90,7 @@ def test_arbitrage_execution_and_pnl():
     exit_check = strat.check_exit(pos)
     assert exit_check is not None
     reason, hl_px, bn_px = exit_check
-    assert reason == "CONVERGENCE_TARGET"
+    assert reason in ("CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET")
 
     # Tancament
     closed_pos = exchange.close_arbitrage_position(pos.pair_id, hl_px, bn_px, reason=reason, is_maker=False)

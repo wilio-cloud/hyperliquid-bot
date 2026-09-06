@@ -126,12 +126,14 @@ class ArbitrageTradingBotApp:
                 exit_eval = self.strategy.check_exit(pos)
                 if exit_eval:
                     reason, hl_px, bn_px = exit_eval
+                    # En tancaments ordenats (convergència o take profit), apliquem comissió passiva Maker (estalvi del 60% en sortida)
+                    is_maker_exit = reason in ("CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET")
                     self.exchange.close_arbitrage_position(
                         pair_id=pos.pair_id,
                         hl_exit_price=hl_px,
                         bn_exit_price=bn_px,
                         reason=reason,
-                        is_maker=False,
+                        is_maker=is_maker_exit,
                     )
 
         # 2. Comprova cooldown de seguretat

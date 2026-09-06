@@ -21,8 +21,9 @@ class CrossExchangeArbitrageStrategy:
         target_exit_spread_pct: float = 0.010, # Convergència de sortida (<= +0.010%)
         min_profit_usd: float = 0.05,          # Benefici net mínim permes a la convergència (+0.05$)
         take_profit_usd: float = 0.50,         # Tancament automàtic per benefici substancial (+0.50$)
-        max_divergence_pct: float = 0.40,      # Stop de divergència (+0.40% addicional respecte l'entrada)
-        max_hold_seconds: int = 14400,         # 4 hores màxim per posició
+        max_divergence_pct: float = 2.50,      # Stop de divergència (+2.50% addicional per a deslligaments reals, no metxes de 1 cèntim)
+        divergence_min_duration_sec: float = 60.0, # Requereix que la divergència sigui sostinguda almenys 60 segons
+        max_hold_seconds: int = 43200,         # 12 hores màxim per posició (permet collir funding passiu)
     ):
         self.name = "CROSS_ARBITRAGE"
         self.min_entry_spread_pct = min_entry_spread_pct
@@ -30,6 +31,7 @@ class CrossExchangeArbitrageStrategy:
         self.min_profit_usd = min_profit_usd
         self.take_profit_usd = take_profit_usd
         self.max_divergence_pct = max_divergence_pct
+        self.divergence_min_duration_sec = divergence_min_duration_sec
         self.max_hold_seconds = max_hold_seconds
 
         self.hl_books: Dict[str, OrderBookL2] = {}
@@ -160,11 +162,11 @@ class CrossExchangeArbitrageStrategy:
             current_spread_to_close = ((hl_exit_px - bn_exit_px) / global_mid) * 100.0
             pos.current_spread_pct = current_spread_to_close
 
-            # Càlcul del PnL net projectat si tanquem en aquest instant:
+            # Càlcul del PnL net projectat (utilitzant comissions Maker per a sortida ordenada per límit):
             hl_gross = (pos.leg_hl.entry_price - hl_exit_px) * pos.leg_hl.size
             bn_gross = (bn_exit_px - pos.leg_bn.entry_price) * pos.leg_bn.size
-            hl_exit_fee = pos.leg_hl.size * hl_exit_px * pos.leg_hl.fee_rate
-            bn_exit_fee = pos.leg_bn.size * bn_exit_px * pos.leg_bn.fee_rate
+            hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00010  # Maker exit 0.010%
+            bn_exit_fee = pos.leg_bn.size * bn_exit_px * 0.00020  # Maker exit 0.020%
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
@@ -179,9 +181,14 @@ class CrossExchangeArbitrageStrategy:
                 # Si no arriba al marge mínim, com que la posició és delta-neutral (0 risc direccional),
                 # no tanquem amb pèrdua: mantenim per cobrar funding o esperar una oscil·lació millor
 
-            # 3. Stop loss de divergència catastròfica
+            # 3. Stop loss de divergència catastròfica amb filtre de persistència (evita tancar en metxes de soroll)
             if current_spread_to_close >= (pos.entry_spread_pct + self.max_divergence_pct):
-                return ("STOP_LOSS_DIVERGENCE", hl_exit_px, bn_exit_px)
+                if pos.divergence_start_time is None:
+                    pos.divergence_start_time = time.time()
+                elif (time.time() - pos.divergence_start_time) >= self.divergence_min_duration_sec:
+                    return ("STOP_LOSS_DIVERGENCE", hl_exit_px, bn_exit_px)
+            else:
+                pos.divergence_start_time = None
 
         else:  # BUY_HL_SELL_BN
             # Entrada: Comprem HL (ask), Venem BN (bid).
@@ -194,8 +201,8 @@ class CrossExchangeArbitrageStrategy:
             # Càlcul del PnL net projectat:
             hl_gross = (hl_exit_px - pos.leg_hl.entry_price) * pos.leg_hl.size
             bn_gross = (pos.leg_bn.entry_price - bn_exit_px) * pos.leg_bn.size
-            hl_exit_fee = pos.leg_hl.size * hl_exit_px * pos.leg_hl.fee_rate
-            bn_exit_fee = pos.leg_bn.size * bn_exit_px * pos.leg_bn.fee_rate
+            hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00010
+            bn_exit_fee = pos.leg_bn.size * bn_exit_px * 0.00020
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
@@ -207,9 +214,14 @@ class CrossExchangeArbitrageStrategy:
                     return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
 
             if current_spread_to_close >= (pos.entry_spread_pct + self.max_divergence_pct):
-                return ("STOP_LOSS_DIVERGENCE", hl_exit_px, bn_exit_px)
+                if pos.divergence_start_time is None:
+                    pos.divergence_start_time = time.time()
+                elif (time.time() - pos.divergence_start_time) >= self.divergence_min_duration_sec:
+                    return ("STOP_LOSS_DIVERGENCE", hl_exit_px, bn_exit_px)
+            else:
+                pos.divergence_start_time = None
 
-        # Límit de temps de seguretat (4 hores)
+        # Límit de temps de seguretat (12 hores)
         if (time.time() - pos.entry_time) >= self.max_hold_seconds:
             return ("TIME_LIMIT", hl_exit_px, bn_exit_px)
 
