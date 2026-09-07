@@ -886,6 +886,7 @@ class WebDashboardServer:
         self.app.router.add_get("/", self.handle_index)
         self.app.router.add_get("/api/status", self.handle_status)
         self.app.router.add_get("/api/logs", self.handle_logs)
+        self.app.router.add_get("/api/diag", self.handle_diag)
         self.runner = None
 
     async def handle_index(self, request):
@@ -979,6 +980,19 @@ class WebDashboardServer:
         else:
             lines = ["Cap fitxer trading_bot.log trobat encara.\n"]
         return web.Response(text="".join(lines), content_type="text/plain")
+
+    async def handle_diag(self, request):
+        diag = {}
+        try:
+            if hasattr(self.exchange, "aevo_client"):
+                diag["aevo_account"] = await self.exchange.aevo_client.get_account()
+                diag["aevo_portfolio"] = await self.exchange.aevo_client.get_account_state()
+                diag["aevo_positions"] = await self.exchange.aevo_client.get_positions()
+            if hasattr(self.exchange, "hl_client"):
+                diag["hl_account"] = await self.exchange.hl_client.get_account_state()
+        except Exception as e:
+            diag["error"] = str(e)
+        return web.json_response(diag)
 
     async def start(self):
         self.runner = web.AppRunner(self.app)

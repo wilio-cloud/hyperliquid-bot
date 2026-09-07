@@ -131,6 +131,53 @@ class AevoLiveClient:
                 logger.error(f"Error consultant portfolio Aevo ({resp.status}): {text}")
                 return {}
 
+    async def get_account(self) -> Dict[str, Any]:
+        """Consulta la informació completa del compte Aevo (margins, leverage, etc)."""
+        url = f"{self.rest_url}/account"
+        try:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self.ssl_context)) as session:
+                async with session.get(url, headers=self.headers, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    text = await resp.text()
+                    logger.error(f"Error consultant account Aevo ({resp.status}): {text}")
+                    return {}
+        except Exception as e:
+            logger.error(f"Excepció consultant account Aevo: {e}")
+            return {}
+
+    async def set_leverage(self, coin: str, leverage: int = 2) -> Dict[str, Any]:
+        """Ajusta el palanquejament per a un instrument a Aevo."""
+        inst_id = self.get_instrument_id(coin)
+        if not inst_id:
+            return {"status": "err", "error": f"Instrument no trobat: {coin}"}
+        url = f"{self.rest_url}/account/leverage"
+        try:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self.ssl_context)) as session:
+                async with session.post(url, json={"instrument": inst_id, "leverage": int(leverage)}, headers=self.headers, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
+                    data = await resp.json()
+                    logger.info(f"Palanquejament Aevo ajustat per a {coin} ({leverage}x): {data}")
+                    return data
+        except Exception as e:
+            logger.error(f"Error ajustant palanquejament Aevo per a {coin}: {e}")
+            return {"error": str(e)}
+
+    async def set_margin_type(self, coin: str, margin_type: str = "CROSS") -> Dict[str, Any]:
+        """Ajusta el tipus de marge (CROSS / ISOLATED) per a un instrument a Aevo."""
+        inst_id = self.get_instrument_id(coin)
+        if not inst_id:
+            return {"status": "err", "error": f"Instrument no trobat: {coin}"}
+        url = f"{self.rest_url}/account/margin-type"
+        try:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self.ssl_context)) as session:
+                async with session.post(url, json={"instrument": inst_id, "margin_type": margin_type.upper()}, headers=self.headers, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
+                    data = await resp.json()
+                    logger.info(f"Tipus de marge Aevo ajustat per a {coin} ({margin_type}): {data}")
+                    return data
+        except Exception as e:
+            logger.error(f"Error ajustant tipus de marge Aevo per a {coin}: {e}")
+            return {"error": str(e)}
+
     async def get_balance(self) -> float:
         """Retorna el marge/balanç disponible en USD a Aevo."""
         try:
