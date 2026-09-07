@@ -107,8 +107,13 @@ class HyperliquidLiveClient:
             except Exception as e:
                 logger.debug(f"No s'ha pogut consultar spot state a Hyperliquid: {e}")
 
-            # Saldo total disponible per operar
-            total_bal = max(account_value + spot_usdc, withdrawable, account_value)
+            # En comptes Unified, spot_usdc ja conté la totalitat del capital (inclòs el marge 'hold').
+            # Només si spot_usdc és 0 utilitzem account_value o withdrawable del clearinghouse de perps.
+            if spot_usdc > 0:
+                total_bal = spot_usdc
+            else:
+                total_bal = max(account_value, withdrawable)
+
             logger.info(
                 f"Balanç Hyperliquid obtingut: Perps={account_value:.2f}$, "
                 f"SpotUSDC={spot_usdc:.2f}$, Withdrawable={withdrawable:.2f}$ -> Total={total_bal:.2f}$"
