@@ -28,7 +28,7 @@ class CrossExchangeArbitrageStrategy:
         max_divergence_pct: float = 2.50,      # Stop de divergència (+2.50% addicional per a deslligaments reals, no metxes de 1 cèntim)
         divergence_min_duration_sec: float = 60.0, # Requereix que la divergència sigui sostinguda almenys 60 segons
         max_hold_seconds: int = 43200,         # 12 hores màxim per posició (permet collir funding passiu)
-        max_book_spread_pct: float = 0.250,    # Llindar màxim d'spread intern (adaptat a llibres d'altcoins d'Aevo)
+        max_book_spread_pct: float = 0.350,    # Llindar màxim d'spread intern (adaptat a llibres d'altcoins d'Aevo)
     ):
         self.name = "CROSS_ARBITRAGE"
         self.min_entry_spread_pct = min_entry_spread_pct

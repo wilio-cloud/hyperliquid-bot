@@ -56,7 +56,7 @@ class ArbitrageTradingBotApp:
         size_usd: float = 300.0,
         headless: bool = False,
         max_positions: int = 3,
-        max_book_spread: float = 0.250,
+        max_book_spread: float = 0.350,
         initial_balance: float = 1000.0,
         leverage: float = 2.0,
         dynamic_size: bool = True,
@@ -524,7 +524,7 @@ def main():
     min_profit_default = float(os.environ.get("MIN_PROFIT", "0.10"))
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
     max_positions_default = int(os.environ.get("MAX_POSITIONS", "3"))
-    max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.250"))
+    max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.350"))
     venue2_default = os.environ.get("VENUE2", "aevo").lower()
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
     leverage_default = float(os.environ.get("LEVERAGE", "2.0"))
@@ -551,7 +551,7 @@ def main():
     parser.add_argument("--min-profit", type=float, default=min_profit_default, help="Benefici net mínim permès per trade tancat (default: 0.10$)")
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
     parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 3)")
-    parser.add_argument("--max-book-spread", type=float, default=max_book_spread_default, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.250%%)")
+    parser.add_argument("--max-book-spread", type=float, default=max_book_spread_default, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.350%%)")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
     parser.add_argument("--no-burst", action="store_true", help="Desactivar Volume Burst (només scalper)")
@@ -559,7 +559,12 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "arbitrage":
-        default_coins = ["BTC", "ETH", "SOL"] if args.venue2 == "dydx" else ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
+        if args.venue2 == "dydx":
+            default_coins = ["BTC", "ETH", "SOL"]
+        elif args.venue2 == "aevo":
+            default_coins = ["BTC", "ETH", "SOL", "HYPE", "BNB", "XRP", "NEAR", "SUI"]
+        else:
+            default_coins = ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
         coins = args.coins or default_coins
         app = ArbitrageTradingBotApp(
             coins=coins,
