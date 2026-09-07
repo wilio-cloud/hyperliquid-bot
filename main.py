@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import datetime
 import logging
 import os
 import signal
@@ -63,6 +64,7 @@ class ArbitrageTradingBotApp:
         size_pct: float = 25.0,
         min_size_usd: float = 100.0,
         max_size_usd: float = 2500.0,
+        state_file: Optional[str] = None,
     ):
         self.coins = coins
         self.venue2 = venue2.lower()
@@ -93,6 +95,7 @@ class ArbitrageTradingBotApp:
             leverage=self.leverage,
             on_open_cb=self._on_pair_open,
             on_close_cb=self._on_pair_close,
+            state_file=state_file,
         )
         self.strategy = CrossExchangeArbitrageStrategy(
             min_entry_spread_pct=min_spread,
@@ -345,11 +348,94 @@ class ArbitrageTradingBotApp:
         metrics["max_book_spread"] = self.strategy.max_book_spread_pct
 
         # Càlcul del ritme horari global i mètriques detallades per actiu (Coin Analytics)
-        elapsed_hours = max((time.time() - self.start_time) / 3600.0, 1.0 / 3600.0)
+        if self.exchange.closed_positions:
+            first_trade_t = min(p.entry_time for p in self.exchange.closed_positions if p.entry_time > 0)
+            elapsed_hours = max((time.time() - min(self.start_time, first_trade_t)) / 3600.0, 0.25)
+        else:
+            elapsed_hours = max((time.time() - self.start_time) / 3600.0, 1.0 / 3600.0)
+
         total_closed = len(self.exchange.closed_positions)
         trades_per_hour = round(total_closed / elapsed_hours, 1)
         metrics["trades_per_hour"] = trades_per_hour
         metrics["target_trades_per_hour"] = "8-10"
+
+        realized_pnl_total = sum(p.realized_pnl for p in self.exchange.closed_positions)
+        avg_trade_pnl = (realized_pnl_total / total_closed) if total_closed > 0 else 0.12
+        live_pace = trades_per_hour if trades_per_hour > 0 else 8.0
+        cur_hourly_rate = live_pace * avg_trade_pnl
+        bal = self.exchange.total_balance_usd
+
+        # Model de projeccions i simulador d'escenaris
+        scenarios_dict = {
+            "current_measured": {
+                "id": "current_measured",
+                "label": "Mesurat Real en Viu",
+                "pace_h": live_pace,
+                "avg_profit": round(avg_trade_pnl, 3),
+                "hourly_rate": round(cur_hourly_rate, 3),
+                "day_profit": round(cur_hourly_rate * 24, 2),
+                "week_profit": round(cur_hourly_rate * 24 * 7, 2),
+                "month_profit": round(cur_hourly_rate * 24 * 30, 2),
+                "month_roi_pct": round((cur_hourly_rate * 24 * 30 / bal) * 100.0, 1),
+            },
+            "expected": {
+                "id": "expected",
+                "label": "Escenari Objectiu (8-10 op/h)",
+                "pace_h": 9.0,
+                "avg_profit": 0.12,
+                "hourly_rate": 1.08,
+                "day_profit": 25.92,
+                "week_profit": 181.44,
+                "month_profit": 777.60,
+                "month_roi_pct": round((777.60 / bal) * 100.0, 1),
+            },
+            "conservative": {
+                "id": "conservative",
+                "label": "Escenari Conservador (5 op/h)",
+                "pace_h": 5.0,
+                "avg_profit": 0.08,
+                "hourly_rate": 0.40,
+                "day_profit": 9.60,
+                "week_profit": 67.20,
+                "month_profit": 288.00,
+                "month_roi_pct": round((288.00 / bal) * 100.0, 1),
+            },
+            "ny_volatility": {
+                "id": "ny_volatility",
+                "label": "Obertura NY / Volatilitat (12-15 op/h)",
+                "pace_h": 14.0,
+                "avg_profit": 0.15,
+                "hourly_rate": 2.10,
+                "day_profit": 50.40,
+                "week_profit": 352.80,
+                "month_profit": 1512.00,
+                "month_roi_pct": round((1512.00 / bal) * 100.0, 1),
+            },
+        }
+
+        projections = {
+            "avg_pnl_per_trade": round(avg_trade_pnl, 4),
+            "current_pace_oph": live_pace,
+            "scenarios": scenarios_dict,
+            **scenarios_dict,
+        }
+
+        # Monitor de sessió d'obertura de Nova York (Wall Street / CME: 13:30 - 20:00 UTC)
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        utc_min = now_utc.hour * 60 + now_utc.minute
+        is_ny_active = 810 <= utc_min < 1200
+        is_ny_premarket = 720 <= utc_min < 810
+        mins_to_open = max(0, 810 - utc_min) if utc_min < 810 else 0
+
+        ny_session = {
+            "is_active": is_ny_active,
+            "is_premarket": is_ny_premarket,
+            "minutes_to_open": mins_to_open,
+            "status_text": "🟢 SESSIÓ NY ACTIVA (Màxim Volum)" if is_ny_active else (
+                f"⏳ PRE-MARKET NY (Obre en {mins_to_open} min)" if is_ny_premarket else "⏸️ FORA DE SESSIÓ NY"
+            ),
+            "volatility_boost_factor": 1.75 if is_ny_active else (1.30 if is_ny_premarket else 1.0),
+        }
 
         coin_stats = []
         for coin in self.coins:
@@ -423,6 +509,9 @@ class ArbitrageTradingBotApp:
             "positions": positions,
             "recent_closed": recent_closed,
             "coin_stats": coin_stats,
+            "projections": projections,
+            "ny_session": ny_session,
+            "equity_history": getattr(self.exchange, "equity_history", []),
         }
 
     async def run(self, duration_sec: int = 0):
@@ -659,6 +748,7 @@ def main():
             size_pct=args.size_pct,
             min_size_usd=args.min_size,
             max_size_usd=args.max_size,
+            state_file=os.getenv("STATE_FILE", "paper_state.json"),
         )
     else:
         coins = args.coins or ["BTC"]

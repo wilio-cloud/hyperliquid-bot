@@ -1,6 +1,6 @@
-"""Simulador d'execució dual per a arbitratge creuat (Hyperliquid + Binance)."""
-
+import json
 import logging
+import os
 import time
 from typing import Callable, Dict, List, Optional
 
@@ -27,6 +27,7 @@ class ArbitragePaperExchange:
         bn_taker_fee: Optional[float] = None,
         on_open_cb: Optional[Callable[[ArbitragePosition], None]] = None,
         on_close_cb: Optional[Callable[[ArbitragePosition, str, float], None]] = None,
+        state_file: Optional[str] = None,
     ):
         self.venue2_name = venue2_name.upper()
         self.leverage = leverage
@@ -66,6 +67,12 @@ class ArbitragePaperExchange:
         
         self.total_funding_collected = 0.0
         self.total_fees_paid = 0.0
+        self.equity_history: List[dict] = []
+        self.state_file: Optional[str] = state_file
+
+        # Carrega l'estat previ si s'ha definit un fitxer d'estat
+        if self.state_file:
+            self.load_state()
 
     @property
     def total_balance_usd(self) -> float:
@@ -180,6 +187,9 @@ class ArbitragePaperExchange:
             f"[ARB OBERT] {signal.coin} {signal.direction.value} | "
             f"HL: {signal.hl_price:.2f} | BN: {signal.bn_price:.2f} | Spread: {signal.spread_pct:+.3f}%"
         )
+        self.record_equity_point("OPEN")
+        self.save_state()
+
         if self.on_open_cb:
             self.on_open_cb(position)
 
@@ -243,6 +253,8 @@ class ArbitragePaperExchange:
             self.bn_balance_usd += bn_payment
 
             pos.update_pnl()
+            self.record_equity_point("FUNDING")
+            self.save_state()
             logger.info(
                 f"[FUNDING PAGAT] {coin} {pos.direction.value}: HL {hl_payment:+.4f}$ + BN {bn_payment:+.4f}$ = Net {net_hour_funding:+.4f}$"
             )
@@ -297,10 +309,97 @@ class ArbitragePaperExchange:
             f"[ARB TANCAT {reason}] {pos.coin} {pos.direction.value} | PnL Net: {net_pnl:+.3f}$ "
             f"(Funding: {pos.accumulated_funding:+.4f}$, Fees Totals: {pos.total_fees:.4f}$)"
         )
+        self.record_equity_point(f"CLOSE_{reason}")
+        self.save_state()
+
         if self.on_close_cb:
             self.on_close_cb(pos, reason, net_pnl)
 
         return pos
+
+    def record_equity_point(self, event_type: str = "TICK"):
+        """Enregistra un punt cronològic en la corba històrica d'equity."""
+        now = time.time()
+        point = {
+            "t": round(now, 1),
+            "equity": round(self.total_balance_usd + self.total_unrealized_pnl, 3),
+            "balance": round(self.total_balance_usd, 3),
+            "realized_pnl": round(sum(p.realized_pnl for p in self.closed_positions), 3),
+            "unrealized_pnl": round(self.total_unrealized_pnl, 3),
+            "trades": len(self.closed_positions),
+            "event": event_type,
+        }
+        self.equity_history.append(point)
+        if len(self.equity_history) > 600:
+            self.equity_history = self.equity_history[-600:]
+
+    def save_state(self, filepath: Optional[str] = None):
+        """Desa l'estat actual en format JSON a disc per protegir les dades en redeploys."""
+        path = filepath or self.state_file
+        if not path:
+            return
+        try:
+            active_list = []
+            for p in self.active_positions.values():
+                d = p.model_dump() if hasattr(p, "model_dump") else p.dict()
+                active_list.append(d)
+
+            closed_list = []
+            for p in self.closed_positions:
+                d = p.model_dump() if hasattr(p, "model_dump") else p.dict()
+                closed_list.append(d)
+
+            data = {
+                "hl_balance_usd": self.hl_balance_usd,
+                "bn_balance_usd": self.bn_balance_usd,
+                "initial_total_balance": self.initial_total_balance,
+                "total_fees_paid": self.total_fees_paid,
+                "total_funding_collected": self.total_funding_collected,
+                "active_positions": active_list,
+                "closed_positions": closed_list,
+                "equity_history": self.equity_history,
+                "last_saved": time.time(),
+            }
+            tmp_path = path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp_path, path)
+        except Exception as e:
+            logger.debug(f"Error desant paper_state: {e}")
+
+    def load_state(self, filepath: Optional[str] = None) -> bool:
+        """Carrega l'estat de l'exchange si existeix el fitxer JSON."""
+        path = filepath or self.state_file
+        if not path or not os.path.exists(path):
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.hl_balance_usd = float(data.get("hl_balance_usd", self.hl_balance_usd))
+            self.bn_balance_usd = float(data.get("bn_balance_usd", self.bn_balance_usd))
+            self.initial_total_balance = float(data.get("initial_total_balance", self.initial_total_balance))
+            self.total_fees_paid = float(data.get("total_fees_paid", self.total_fees_paid))
+            self.total_funding_collected = float(data.get("total_funding_collected", self.total_funding_collected))
+            self.equity_history = data.get("equity_history", [])
+
+            self.active_positions.clear()
+            for p_dict in data.get("active_positions", []):
+                pos = ArbitragePosition(**p_dict)
+                self.active_positions[pos.pair_id] = pos
+
+            self.closed_positions.clear()
+            for p_dict in data.get("closed_positions", []):
+                pos = ArbitragePosition(**p_dict)
+                self.closed_positions.append(pos)
+
+            logger.info(
+                f"[STATE RESTORED] {len(self.closed_positions)} operacions tancades restaurades, "
+                f"{len(self.active_positions)} obertes | Balanç: {self.total_balance_usd:.2f}$"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error carregant paper_state: {e}")
+            return False
 
     @property
     def metrics(self) -> dict:
@@ -332,4 +431,5 @@ class ArbitragePaperExchange:
             "winrate_pct": winrate,
             "profit_factor": profit_factor,
             "active_positions_count": len(self.active_positions),
+            "equity_history": self.equity_history,
         }

@@ -10,6 +10,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Arbitratge Delta-Neutral • Hyperliquid DEX</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         body { background: #0b0f19; color: #f8fafc; padding: 16px; }
@@ -38,6 +39,35 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .tag-sell { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid #ef4444; }
         .tag-neutral { color: #64748b; }
         .footer { text-align: center; font-size: 0.75rem; color: #475569; margin-top: 24px; }
+
+        /* Estils del Panell de Gràfica i Simulador */
+        .card-chart { background: #131d31; border: 1px solid #1e293b; border-radius: 10px; padding: 16px; margin-bottom: 24px; }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #1e293b; }
+        .chart-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+        .btn-group { display: inline-flex; background: #0b0f19; border-radius: 8px; padding: 2px; border: 1px solid #1e293b; }
+        .btn-horizon { background: transparent; color: #94a3b8; border: none; padding: 6px 12px; font-size: 0.76rem; font-weight: 600; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; }
+        .btn-horizon:hover { color: #f8fafc; }
+        .btn-horizon.active { background: #38bdf8; color: #0b0f19; font-weight: bold; }
+        .toggles-group { display: flex; flex-wrap: wrap; gap: 6px; }
+        .toggle-chip { font-size: 0.72rem; padding: 4px 10px; border-radius: 999px; cursor: pointer; border: 1px solid transparent; user-select: none; transition: all 0.15s; font-weight: 600; }
+        .chip-real { background: rgba(192, 132, 252, 0.15); color: #c084fc; border-color: #c084fc; }
+        .chip-actual { background: rgba(16, 185, 129, 0.15); color: #10b981; border-color: #10b981; }
+        .chip-target { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-color: #38bdf8; }
+        .chip-cons { background: rgba(250, 204, 21, 0.15); color: #facc15; border-color: #facc15; }
+        .chip-ny { background: rgba(249, 115, 22, 0.15); color: #fb923c; border-color: #f97316; }
+        .chip-custom { background: rgba(255, 255, 255, 0.08); color: #e2e8f0; border-color: #94a3b8; }
+        .chip-inactive { opacity: 0.35; border-color: transparent !important; text-decoration: line-through; }
+        .slider-container { display: flex; align-items: center; gap: 12px; background: #0b0f19; padding: 8px 14px; border-radius: 8px; border: 1px solid #1e293b; font-size: 0.8rem; color: #cbd5e1; margin-bottom: 14px; }
+        .slider-container input[type=range] { flex: 1; accent-color: #38bdf8; cursor: pointer; }
+        .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #1e293b; }
+        .kpi-box { background: #0b0f19; padding: 10px; border-radius: 6px; border: 1px solid #1e293b; }
+        .kpi-box .kpi-lbl { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 3px; }
+        .kpi-box .kpi-val { font-size: 1.05rem; font-weight: bold; }
+        .kpi-box .kpi-sub { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
+        .ny-badge { padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+        .ny-open { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; }
+        .ny-pre { background: rgba(249, 115, 22, 0.2); color: #fb923c; border: 1px solid #f97316; }
+        .ny-closed { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid #475569; }
     </style>
 </head>
 <body>
@@ -83,6 +113,83 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <div class="label">Comissions</div>
                 <div class="val purple" id="fees">-</div>
                 <div class="sub">Maker & Taker nets</div>
+            </div>
+        </div>
+
+        <!-- Gràfica de Simulació d'Escenaris i Equitat en Viu -->
+        <div class="card-chart">
+            <div class="chart-header">
+                <div>
+                    <h2 style="font-size: 1.05rem; color: #38bdf8; display: flex; align-items: center; gap: 8px;">
+                        📈 Trajectòria d'Equitat en Viu i Simulador de Creixement
+                    </h2>
+                    <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 3px;">
+                        Model compost a 25% de capital per ordre • Projeccions d'alta freqüència segons volum d'operacions
+                    </div>
+                </div>
+                <div id="ny-session-badge" class="ny-badge ny-pre">
+                    🔔 Pre-Market NY: Obertura en --m
+                </div>
+            </div>
+
+            <!-- Controls d'Horitzó i Toggles de Corbes -->
+            <div class="chart-controls">
+                <div class="btn-group" id="horizon-selector">
+                    <button class="btn-horizon active" onclick="setHorizon(24)">24 Hores (1D)</button>
+                    <button class="btn-horizon" onclick="setHorizon(72)">3 Dies</button>
+                    <button class="btn-horizon" onclick="setHorizon(168)">7 Dies (1S)</button>
+                    <button class="btn-horizon" onclick="setHorizon(720)">30 Dies (1M)</button>
+                </div>
+                <div class="toggles-group">
+                    <span class="toggle-chip chip-real" id="chip-real" onclick="toggleCurve('real')">🟣 Equitat Real</span>
+                    <span class="toggle-chip chip-actual" id="chip-actual" onclick="toggleCurve('actual')">🟢 Ritme Actual (<span id="lbl-pace-act">8.0</span> op/h)</span>
+                    <span class="toggle-chip chip-target" id="chip-target" onclick="toggleCurve('target')">🔵 Objectiu (9.0 op/h)</span>
+                    <span class="toggle-chip chip-cons" id="chip-cons" onclick="toggleCurve('conservative')">🟡 Conservador (5.0 op/h)</span>
+                    <span class="toggle-chip chip-ny" id="chip-ny" onclick="toggleCurve('ny')">🟠 Volatilitat NY (14 op/h)</span>
+                    <span class="toggle-chip chip-custom" id="chip-custom" onclick="toggleCurve('custom')">⚪ Slider Personalitzat</span>
+                </div>
+            </div>
+
+            <!-- Slider Interactiu de Ritme -->
+            <div class="slider-container">
+                <span style="font-weight: 600; white-space: nowrap;">⚡ Simular Ritme:</span>
+                <input type="range" id="sim-slider" min="1" max="25" step="0.5" value="8.0" oninput="onSliderInput(this.value)">
+                <span id="slider-label" style="font-weight: bold; color: #38bdf8; min-width: 70px;">8.0 op/h</span>
+                <span id="slider-gain-est" style="font-weight: 600; color: #10b981; margin-left: auto;">...</span>
+            </div>
+
+            <!-- Canvas de Chart.js -->
+            <div style="position: relative; height: 320px; width: 100%;">
+                <canvas id="growthChart"></canvas>
+            </div>
+
+            <!-- Mini KPIs de Projecció -->
+            <div class="kpi-row">
+                <div class="kpi-box">
+                    <div class="kpi-lbl">Balanç & PnL Real</div>
+                    <div class="kpi-val purple" id="kpi-real-bal">1,001.05 $</div>
+                    <div class="kpi-sub" id="kpi-real-sub">+1.05$ (100% winrate)</div>
+                </div>
+                <div class="kpi-box">
+                    <div class="kpi-lbl">Projecció 24 Hores</div>
+                    <div class="kpi-val green" id="kpi-24h-val">~1,023 $</div>
+                    <div class="kpi-sub" id="kpi-24h-sub">+2.2% ritme mesurat</div>
+                </div>
+                <div class="kpi-box">
+                    <div class="kpi-lbl">Projecció 7 Dies</div>
+                    <div class="kpi-val green" id="kpi-7d-val">~1,171 $</div>
+                    <div class="kpi-sub" id="kpi-7d-sub">+17.0% compost</div>
+                </div>
+                <div class="kpi-box">
+                    <div class="kpi-lbl">Projecció 30 Dies</div>
+                    <div class="kpi-val green" id="kpi-30d-val">~1,960 $</div>
+                    <div class="kpi-sub" id="kpi-30d-sub">+95.9% compost mensual</div>
+                </div>
+                <div class="kpi-box">
+                    <div class="kpi-lbl">Sessió Wall St (NY)</div>
+                    <div class="kpi-val" style="color: #fb923c;" id="kpi-ny-val">Pre-Market</div>
+                    <div class="kpi-sub" id="kpi-ny-sub">Factor x1.40 oportunitats</div>
+                </div>
             </div>
         </div>
 
@@ -191,6 +298,331 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const fmtPx = (p) => (typeof p === 'number' && !isNaN(p)) ? p.toFixed(p < 1.0 ? 4 : 2) : '-';
         const fmtPct = (p) => (typeof p === 'number' && !isNaN(p)) ? (p >= 0 ? '+' : '') + p.toFixed(3) + '%' : '-';
 
+        let chartInstance = null;
+        let currentHorizon = 24; // 24, 72, 168, 720 hores
+        let customSliderPace = 8.0;
+        let curveVisibility = {
+            real: true,
+            actual: true,
+            target: true,
+            conservative: true,
+            ny: true,
+            custom: true
+        };
+        let cachedStatusData = null;
+
+        function initChart() {
+            if (typeof Chart === 'undefined') {
+                return;
+            }
+            const canvas = document.getElementById('growthChart');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Equitat Real (En Viu)',
+                            data: [],
+                            borderColor: '#c084fc',
+                            backgroundColor: 'rgba(192, 132, 252, 0.08)',
+                            fill: true,
+                            borderWidth: 3,
+                            pointRadius: 3,
+                            pointHoverRadius: 5,
+                            tension: 0.1,
+                            spanGaps: false
+                        },
+                        {
+                            label: 'Ritme Actual Mesurat',
+                            data: [],
+                            borderColor: '#10b981',
+                            borderWidth: 2.5,
+                            pointRadius: 2,
+                            tension: 0.2,
+                            spanGaps: false
+                        },
+                        {
+                            label: 'Objectiu (8-10 op/h)',
+                            data: [],
+                            borderColor: '#38bdf8',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            tension: 0.2,
+                            spanGaps: false
+                        },
+                        {
+                            label: 'Conservador (5 op/h)',
+                            data: [],
+                            borderColor: '#facc15',
+                            borderWidth: 2,
+                            borderDash: [4, 4],
+                            pointRadius: 0,
+                            tension: 0.2,
+                            spanGaps: false
+                        },
+                        {
+                            label: 'Volatilitat NY (14 op/h)',
+                            data: [],
+                            borderColor: '#f97316',
+                            borderWidth: 2,
+                            borderDash: [3, 3],
+                            pointRadius: 0,
+                            tension: 0.2,
+                            spanGaps: false
+                        },
+                        {
+                            label: 'Simulació Slider',
+                            data: [],
+                            borderColor: '#ffffff',
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            tension: 0.2,
+                            spanGaps: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(19, 29, 49, 0.95)',
+                            titleColor: '#f8fafc',
+                            bodyColor: '#e2e8f0',
+                            borderColor: '#334155',
+                            borderWidth: 1,
+                            padding: 10,
+                            callbacks: {
+                                label: function(context) {
+                                    let l = context.dataset.label || '';
+                                    if (context.parsed.y !== null && context.parsed.y !== undefined) {
+                                        return ` ${l}: ${context.parsed.y.toFixed(2)} $`;
+                                    }
+                                    return null;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.04)' },
+                            ticks: { color: '#94a3b8', font: { size: 11 } }
+                        },
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.04)' },
+                            ticks: {
+                                color: '#94a3b8',
+                                font: { size: 11 },
+                                callback: function(v) { return v.toFixed(0) + ' $'; }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateChartData() {
+            if (!chartInstance || !cachedStatusData) return;
+
+            const data = cachedStatusData;
+            const m = data.metrics || {};
+            const curBal = (typeof m.balance === 'number') ? m.balance : 1000.0;
+            const curPace = (typeof m.trades_per_hour === 'number' && m.trades_per_hour > 0) ? m.trades_per_hour : 8.0;
+            const avgProfit = (data.projections && data.projections.avg_pnl_per_trade) ? data.projections.avg_pnl_per_trade : 0.117;
+
+            const profitPerTrade = avgProfit > 0 ? avgProfit : 0.117;
+            const ratePerTrade = profitPerTrade / curBal;
+
+            // 1. Punts històrics reals
+            const hist = data.equity_history || [];
+            const recentHist = hist.length > 8 ? hist.slice(-8) : hist;
+            
+            let labels = [];
+            let realData = [];
+
+            if (recentHist.length > 0) {
+                recentHist.forEach((pt, idx) => {
+                    const isLast = idx === recentHist.length - 1;
+                    const lbl = isLast ? 'Ara' : (pt.trades ? `T${pt.trades}` : `H${idx}`);
+                    labels.push(lbl);
+                    realData.push(pt.equity);
+                });
+            } else {
+                labels.push('Inici', 'Ara');
+                realData.push(1000.0, curBal);
+            }
+
+            const junctionIdx = labels.length - 1;
+
+            // 2. Passos temporals futurs segons horitzó
+            let stepHours = 2;
+            if (currentHorizon === 72) stepHours = 6;
+            else if (currentHorizon === 168) stepHours = 12;
+            else if (currentHorizon === 720) stepHours = 48;
+
+            const numSteps = Math.round(currentHorizon / stepHours);
+            let futureHours = [];
+            for (let i = 1; i <= numSteps; i++) {
+                const h = i * stepHours;
+                futureHours.push(h);
+                if (currentHorizon <= 24) {
+                    labels.push(`+${h}h`);
+                } else if (currentHorizon <= 72) {
+                    labels.push(`+${h}h`);
+                } else if (currentHorizon <= 168) {
+                    const d = (h / 24).toFixed(1);
+                    labels.push(`+${d}d`);
+                } else {
+                    const d = Math.round(h / 24);
+                    labels.push(`+${d}d`);
+                }
+                realData.push(null);
+            }
+
+            // Funció per calcular la corba composta
+            function calcCurve(pace) {
+                let arr = new Array(junctionIdx).fill(null);
+                arr.push(curBal); // unió exacta a 'Ara'
+                for (let i = 0; i < futureHours.length; i++) {
+                    const h = futureHours[i];
+                    const numTrades = pace * h;
+                    const bal = curBal * Math.pow(1.0 + ratePerTrade, numTrades);
+                    arr.push(bal);
+                }
+                return arr;
+            }
+
+            const actualCurve = calcCurve(curPace);
+            const targetCurve = calcCurve(9.0);
+            const consCurve = calcCurve(5.0);
+            const nyCurve = calcCurve(14.0);
+            const customCurve = calcCurve(customSliderPace);
+
+            chartInstance.data.labels = labels;
+            chartInstance.data.datasets[0].data = realData;
+            chartInstance.data.datasets[1].data = actualCurve;
+            chartInstance.data.datasets[2].data = targetCurve;
+            chartInstance.data.datasets[3].data = consCurve;
+            chartInstance.data.datasets[4].data = nyCurve;
+            chartInstance.data.datasets[5].data = customCurve;
+
+            // Visibilitat de datasets
+            chartInstance.data.datasets[0].hidden = !curveVisibility.real;
+            chartInstance.data.datasets[1].hidden = !curveVisibility.actual;
+            chartInstance.data.datasets[2].hidden = !curveVisibility.target;
+            chartInstance.data.datasets[3].hidden = !curveVisibility.conservative;
+            chartInstance.data.datasets[4].hidden = !curveVisibility.ny;
+            chartInstance.data.datasets[5].hidden = !curveVisibility.custom;
+
+            chartInstance.update('none');
+
+            // Actualització badge slider
+            const sliderFinalBal = customCurve[customCurve.length - 1];
+            const sliderGain = sliderFinalBal - curBal;
+            const sliderGainPct = (sliderGain / curBal) * 100;
+            const horizonLbl = currentHorizon === 24 ? '24h' : (currentHorizon === 72 ? '3 dies' : (currentHorizon === 168 ? '7 dies' : '30 dies'));
+            const sliderGainEl = document.getElementById('slider-gain-est');
+            if (sliderGainEl) {
+                sliderGainEl.innerHTML = `Est. a ${horizonLbl}: <b style="color: #34d399;">${sliderFinalBal.toFixed(1)}$ (+${sliderGainPct.toFixed(1)}%)</b>`;
+            }
+
+            // Actualització KPIs de simulació
+            const kpiRealBal = document.getElementById('kpi-real-bal');
+            if (kpiRealBal) kpiRealBal.innerText = `${curBal.toFixed(2)} $`;
+            const kpiRealSub = document.getElementById('kpi-real-sub');
+            if (kpiRealSub) kpiRealSub.innerText = `+${(m.realized_pnl || 0).toFixed(2)}$ (${fmtNum(m.winrate_pct, 0)}% winrate)`;
+
+            const est24 = curBal * Math.pow(1.0 + ratePerTrade, curPace * 24);
+            const kpi24 = document.getElementById('kpi-24h-val');
+            if (kpi24) kpi24.innerText = `~${est24.toFixed(1)} $`;
+            const kpi24Sub = document.getElementById('kpi-24h-sub');
+            if (kpi24Sub) kpi24Sub.innerText = `+${((est24 - curBal) / curBal * 100).toFixed(1)}% (${curPace.toFixed(1)} op/h)`;
+
+            const est7d = curBal * Math.pow(1.0 + ratePerTrade, curPace * 168);
+            const kpi7d = document.getElementById('kpi-7d-val');
+            if (kpi7d) kpi7d.innerText = `~${est7d.toFixed(1)} $`;
+            const kpi7dSub = document.getElementById('kpi-7d-sub');
+            if (kpi7dSub) kpi7dSub.innerText = `+${((est7d - curBal) / curBal * 100).toFixed(1)}% compost`;
+
+            const est30d = curBal * Math.pow(1.0 + ratePerTrade, curPace * 720);
+            const kpi30d = document.getElementById('kpi-30d-val');
+            if (kpi30d) kpi30d.innerText = `~${est30d.toFixed(0)} $`;
+            const kpi30dSub = document.getElementById('kpi-30d-sub');
+            if (kpi30dSub) kpi30dSub.innerText = `+${((est30d - curBal) / curBal * 100).toFixed(0)}% compost mensual`;
+
+            // Estat Sessió NY
+            const ny = data.ny_session || {};
+            const nyBadge = document.getElementById('ny-session-badge');
+            const nyKpiVal = document.getElementById('kpi-ny-val');
+            const nyKpiSub = document.getElementById('kpi-ny-sub');
+            if (nyBadge) {
+                if (ny.is_open) {
+                    nyBadge.className = 'ny-badge ny-open';
+                    nyBadge.innerText = '🟢 Sessió NY Oberta (Màxima Volatilitat)';
+                    if (nyKpiVal) { nyKpiVal.innerText = 'Oberta 🟢'; nyKpiVal.className = 'kpi-val green'; }
+                    if (nyKpiSub) nyKpiSub.innerText = 'Spreads màxims en curs';
+                } else if (ny.is_premarket) {
+                    nyBadge.className = 'ny-badge ny-pre';
+                    nyBadge.innerText = `🔔 Pre-Market NY (${ny.status_text || 'Obertura propera'})`;
+                    if (nyKpiVal) { nyKpiVal.innerText = `${ny.minutes_to_open || 30} min`; nyKpiVal.className = 'kpi-val yellow'; }
+                    if (nyKpiSub) nyKpiSub.innerText = 'Obertura Wall St 15:30 CET';
+                } else {
+                    nyBadge.className = 'ny-badge ny-closed';
+                    nyBadge.innerText = '🌙 Sessió NY Tancada';
+                    if (nyKpiVal) { nyKpiVal.innerText = 'Tancada'; nyKpiVal.className = 'kpi-val'; }
+                    if (nyKpiSub) nyKpiSub.innerText = 'Règim normal DEX-to-DEX';
+                }
+            }
+        }
+
+        function setHorizon(h) {
+            currentHorizon = h;
+            const btns = document.querySelectorAll('.btn-horizon');
+            btns.forEach(b => b.classList.remove('active'));
+            if (h === 24 && btns[0]) btns[0].classList.add('active');
+            else if (h === 72 && btns[1]) btns[1].classList.add('active');
+            else if (h === 168 && btns[2]) btns[2].classList.add('active');
+            else if (h === 720 && btns[3]) btns[3].classList.add('active');
+            updateChartData();
+        }
+
+        function toggleCurve(key) {
+            curveVisibility[key] = !curveVisibility[key];
+            const chip = document.getElementById('chip-' + key);
+            if (chip) {
+                if (curveVisibility[key]) {
+                    chip.classList.remove('chip-inactive');
+                } else {
+                    chip.classList.add('chip-inactive');
+                }
+            }
+            if (chartInstance) {
+                const datasetMap = { real: 0, actual: 1, target: 2, conservative: 3, ny: 4, custom: 5 };
+                const idx = datasetMap[key];
+                if (idx !== undefined && chartInstance.data.datasets[idx]) {
+                    chartInstance.data.datasets[idx].hidden = !curveVisibility[key];
+                    chartInstance.update('none');
+                }
+            }
+        }
+
+        function onSliderInput(val) {
+            customSliderPace = parseFloat(val);
+            const lbl = document.getElementById('slider-label');
+            if (lbl) lbl.innerText = `${customSliderPace.toFixed(1)} op/h`;
+            updateChartData();
+        }
+
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
@@ -281,6 +713,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
                 document.getElementById('fees').innerText = fmtNum(m.total_fees, 4) + ' $';
                 document.getElementById('uptime').innerText = 'Temps actiu: ' + (data.uptime || '-');
+
+                // Actualització del Simulador i Gràfica Interactiva
+                cachedStatusData = data;
+                const paceActEl = document.getElementById('lbl-pace-act');
+                if (paceActEl) paceActEl.innerText = paceVal.toFixed(1);
+                try {
+                    if (!chartInstance && typeof Chart !== 'undefined') {
+                        initChart();
+                    }
+                    if (chartInstance) {
+                        updateChartData();
+                    }
+                } catch (errChart) {
+                    console.error("Error renderitzant gràfica:", errChart);
+                }
 
                 // Taula Spreads
                 const minSpreadVal = (typeof m.min_spread === 'number') ? m.min_spread : 0.120;
@@ -454,6 +901,9 @@ class WebDashboardServer:
         positions_data = []
         closed_data = []
         coin_stats_data = []
+        projections_data = {}
+        ny_session_data = {}
+        equity_history_data = []
 
         if hasattr(self.app_ref, "get_dashboard_data"):
             data = self.app_ref.get_dashboard_data()
@@ -461,9 +911,13 @@ class WebDashboardServer:
             positions_data = data.get("positions", [])
             closed_data = data.get("recent_closed", [])
             coin_stats_data = data.get("coin_stats", [])
+            projections_data = data.get("projections", {})
+            ny_session_data = data.get("ny_session", {})
+            equity_history_data = data.get("equity_history", getattr(self.exchange, "equity_history", []))
             metrics = data.get("metrics", self.exchange.metrics)
         else:
             metrics = self.exchange.metrics
+            equity_history_data = getattr(self.exchange, "equity_history", [])
             if hasattr(self.exchange, "active_positions"):
                 positions_data = [
                     {
@@ -506,6 +960,9 @@ class WebDashboardServer:
             "positions": positions_data,
             "recent_closed": closed_data,
             "coin_stats": coin_stats_data,
+            "projections": projections_data,
+            "ny_session": ny_session_data,
+            "equity_history": equity_history_data,
         })
 
     async def start(self):

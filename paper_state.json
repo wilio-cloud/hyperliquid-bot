@@ -1,0 +1,498 @@
+{
+  "hl_balance_usd": 507.6177984683266,
+  "bn_balance_usd": 493.0119326248872,
+  "initial_total_balance": 1000.0,
+  "total_fees_paid": 2.0058107625293546,
+  "total_funding_collected": 0.022134824039999997,
+  "active_positions": [
+    {
+      "pair_id": "ARB_PUMP_LIVE_1",
+      "coin": "PUMP",
+      "direction": "SELL_HL_BUY_BN",
+      "entry_spread_pct": 0.022266755733692557,
+      "target_exit_spread_pct": 0.015,
+      "stop_loss_spread_pct": 2.5,
+      "entry_time": 1757245000.0,
+      "current_spread_pct": 0.398,
+      "unrealized_pnl": -1.212,
+      "accumulated_funding": 0.01918,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "PUMP",
+        "side": "SELL",
+        "entry_price": 0.004495,
+        "size": 54972.19,
+        "size_usd": 247.1,
+        "current_price": 0.004526,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.086485
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "PUMP",
+        "side": "BUY",
+        "entry_price": 0.004494,
+        "size": 54972.19,
+        "size_usd": 247.1,
+        "current_price": 0.004513,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.061775
+      },
+      "total_fees": 0.14826,
+      "is_closed": false
+    },
+    {
+      "pair_id": "ARB_ETH_LIVE_2",
+      "coin": "ETH",
+      "direction": "SELL_HL_BUY_BN",
+      "entry_spread_pct": 0.09760339483082926,
+      "target_exit_spread_pct": 0.015,
+      "stop_loss_spread_pct": 2.5,
+      "entry_time": 1757245200.0,
+      "current_spread_pct": 0.1319,
+      "unrealized_pnl": -0.3778,
+      "accumulated_funding": 0.00283,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "ETH",
+        "side": "SELL",
+        "entry_price": 2491.0,
+        "size": 0.0989,
+        "size_usd": 246.4,
+        "current_price": 2494.55,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.08624
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "ETH",
+        "side": "BUY",
+        "entry_price": 2488.57,
+        "size": 0.0989,
+        "size_usd": 246.4,
+        "current_price": 2491.61,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.0616
+      },
+      "total_fees": 0.14784,
+      "is_closed": false
+    },
+    {
+      "pair_id": "ARB_NEAR_LIVE_3",
+      "coin": "NEAR",
+      "direction": "SELL_HL_BUY_BN",
+      "entry_spread_pct": 0.14939548185377755,
+      "target_exit_spread_pct": 0.015,
+      "stop_loss_spread_pct": 2.5,
+      "entry_time": 1757248000.0,
+      "current_spread_pct": 0.124,
+      "unrealized_pnl": -0.2334,
+      "accumulated_funding": 0.0,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "NEAR",
+        "side": "SELL",
+        "entry_price": 2.3465,
+        "size": 105.05,
+        "size_usd": 246.5,
+        "current_price": 2.33875,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.086275
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "NEAR",
+        "side": "BUY",
+        "entry_price": 2.343,
+        "size": 105.05,
+        "size_usd": 246.5,
+        "current_price": 2.338,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.061625
+      },
+      "total_fees": 0.1479,
+      "is_closed": false
+    }
+  ],
+  "closed_positions": [
+    {
+      "pair_id": "ARB_PUMP_CLOSED_1",
+      "coin": "PUMP",
+      "direction": "SELL_HL_BUY_BN",
+      "entry_spread_pct": 0.604,
+      "entry_time": 1757244000.0,
+      "exit_time": 1757244240.0,
+      "accumulated_funding": 0.0,
+      "total_fees": 0.17485,
+      "realized_pnl": 0.19474,
+      "exit_reason": "TAKE_PROFIT_TARGET",
+      "is_closed": true,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "PUMP",
+        "side": "SELL",
+        "entry_price": 0.0045,
+        "size": 55000,
+        "size_usd": 247.5,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.086
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "PUMP",
+        "side": "BUY",
+        "entry_price": 0.00447,
+        "size": 55000,
+        "size_usd": 247.5,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.062
+      }
+    },
+    {
+      "pair_id": "ARB_HYPE_CLOSED_2",
+      "coin": "HYPE",
+      "direction": "BUY_HL_SELL_BN",
+      "entry_spread_pct": 0.0952,
+      "entry_time": 1757244300.0,
+      "exit_time": 1757244532.0,
+      "accumulated_funding": 0.0,
+      "total_fees": 0.17461,
+      "realized_pnl": 0.08413,
+      "exit_reason": "CONVERGENCE_TARGET",
+      "is_closed": true,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "HYPE",
+        "side": "BUY",
+        "entry_price": 87.5,
+        "size": 2.82,
+        "size_usd": 246.7,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.086
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "HYPE",
+        "side": "SELL",
+        "entry_price": 87.58,
+        "size": 2.82,
+        "size_usd": 246.7,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.062
+      }
+    },
+    {
+      "pair_id": "ARB_PUMP_CLOSED_3",
+      "coin": "PUMP",
+      "direction": "SELL_HL_BUY_BN",
+      "entry_spread_pct": 0.238,
+      "entry_time": 1757244600.0,
+      "exit_time": 1757244841.0,
+      "accumulated_funding": 0.0,
+      "total_fees": 0.17408,
+      "realized_pnl": 0.19231,
+      "exit_reason": "TAKE_PROFIT_TARGET",
+      "is_closed": true,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "PUMP",
+        "side": "SELL",
+        "entry_price": 0.0045,
+        "size": 55000,
+        "size_usd": 247.5,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.086
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "PUMP",
+        "side": "BUY",
+        "entry_price": 0.00448,
+        "size": 55000,
+        "size_usd": 247.5,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.062
+      }
+    },
+    {
+      "pair_id": "ARB_NEAR_CLOSED_4",
+      "coin": "NEAR",
+      "direction": "SELL_HL_BUY_BN",
+      "entry_spread_pct": 0.11,
+      "entry_time": 1757244900.0,
+      "exit_time": 1757245054.0,
+      "accumulated_funding": 0.0,
+      "total_fees": 0.17456,
+      "realized_pnl": 0.16465,
+      "exit_reason": "TAKE_PROFIT_TARGET",
+      "is_closed": true,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "NEAR",
+        "side": "SELL",
+        "entry_price": 2.35,
+        "size": 105,
+        "size_usd": 246.7,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.086
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "NEAR",
+        "side": "BUY",
+        "entry_price": 2.347,
+        "size": 105,
+        "size_usd": 246.7,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.062
+      }
+    },
+    {
+      "pair_id": "ARB_NEAR_CLOSED_5",
+      "coin": "NEAR",
+      "direction": "SELL_HL_BUY_BN",
+      "entry_spread_pct": 0.161,
+      "entry_time": 1757245100.0,
+      "exit_time": 1757245254.0,
+      "accumulated_funding": 0.0,
+      "total_fees": 0.17292,
+      "realized_pnl": 0.16168,
+      "exit_reason": "TAKE_PROFIT_TARGET",
+      "is_closed": true,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "NEAR",
+        "side": "SELL",
+        "entry_price": 2.36,
+        "size": 104,
+        "size_usd": 245.4,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.086
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "NEAR",
+        "side": "BUY",
+        "entry_price": 2.356,
+        "size": 104,
+        "size_usd": 245.4,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.062
+      }
+    },
+    {
+      "pair_id": "ARB_SOL_CLOSED_6",
+      "coin": "SOL",
+      "direction": "SELL_HL_BUY_BN",
+      "entry_spread_pct": 0.12,
+      "entry_time": 1757245300.0,
+      "exit_time": 1757245681.0,
+      "accumulated_funding": 0.0,
+      "total_fees": 0.17281,
+      "realized_pnl": 0.04144,
+      "exit_reason": "TIME_QUICK_PROFIT",
+      "is_closed": true,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "SOL",
+        "side": "SELL",
+        "entry_price": 105.1,
+        "size": 2.34,
+        "size_usd": 246.0,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.086
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "SOL",
+        "side": "BUY",
+        "entry_price": 104.97,
+        "size": 2.34,
+        "size_usd": 246.0,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.062
+      }
+    },
+    {
+      "pair_id": "ARB_HYPE_CLOSED_7",
+      "coin": "HYPE",
+      "direction": "BUY_HL_SELL_BN",
+      "entry_spread_pct": 0.141,
+      "entry_time": 1757245700.0,
+      "exit_time": 1757245932.0,
+      "accumulated_funding": 0.0,
+      "total_fees": 0.17292,
+      "realized_pnl": 0.06107,
+      "exit_reason": "TIME_QUICK_PROFIT",
+      "is_closed": true,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "HYPE",
+        "side": "BUY",
+        "entry_price": 87.8,
+        "size": 2.8,
+        "size_usd": 245.8,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.086
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "HYPE",
+        "side": "SELL",
+        "entry_price": 87.92,
+        "size": 2.8,
+        "size_usd": 245.8,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.062
+      }
+    },
+    {
+      "pair_id": "ARB_HYPE_CLOSED_8",
+      "coin": "HYPE",
+      "direction": "BUY_HL_SELL_BN",
+      "entry_spread_pct": 0.112,
+      "entry_time": 1757246000.0,
+      "exit_time": 1757246232.0,
+      "accumulated_funding": 0.0,
+      "total_fees": 0.17259,
+      "realized_pnl": 0.0873,
+      "exit_reason": "CONVERGENCE_TARGET",
+      "is_closed": true,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "HYPE",
+        "side": "BUY",
+        "entry_price": 87.9,
+        "size": 2.8,
+        "size_usd": 246.1,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.086
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "HYPE",
+        "side": "SELL",
+        "entry_price": 88.0,
+        "size": 2.8,
+        "size_usd": 246.1,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.062
+      }
+    },
+    {
+      "pair_id": "ARB_HYPE_CLOSED_9",
+      "coin": "HYPE",
+      "direction": "BUY_HL_SELL_BN",
+      "entry_spread_pct": 0.096,
+      "entry_time": 1757246300.0,
+      "exit_time": 1757246532.0,
+      "accumulated_funding": 0.00012,
+      "total_fees": 0.17247,
+      "realized_pnl": 0.06439,
+      "exit_reason": "TIME_QUICK_PROFIT",
+      "is_closed": true,
+      "leg_hl": {
+        "venue": "HYPERLIQUID",
+        "coin": "HYPE",
+        "side": "BUY",
+        "entry_price": 88.0,
+        "size": 2.8,
+        "size_usd": 246.4,
+        "fee_rate": 0.00035,
+        "fees_paid": 0.086
+      },
+      "leg_bn": {
+        "venue": "AEVO",
+        "coin": "HYPE",
+        "side": "SELL",
+        "entry_price": 88.08,
+        "size": 2.8,
+        "size_usd": 246.4,
+        "fee_rate": 0.00025,
+        "fees_paid": 0.062
+      }
+    }
+  ],
+  "equity_history": [
+    {
+      "t": 1757244000.0,
+      "equity": 1000.0,
+      "balance": 1000.0,
+      "realized_pnl": 0.0,
+      "trades": 0,
+      "event": "START"
+    },
+    {
+      "t": 1757244240.0,
+      "equity": 1000.195,
+      "balance": 1000.195,
+      "realized_pnl": 0.195,
+      "trades": 1,
+      "event": "CLOSE_TAKE_PROFIT"
+    },
+    {
+      "t": 1757244532.0,
+      "equity": 1000.279,
+      "balance": 1000.279,
+      "realized_pnl": 0.279,
+      "trades": 2,
+      "event": "CLOSE_CONVERGENCE"
+    },
+    {
+      "t": 1757244841.0,
+      "equity": 1000.471,
+      "balance": 1000.471,
+      "realized_pnl": 0.471,
+      "trades": 3,
+      "event": "CLOSE_TAKE_PROFIT"
+    },
+    {
+      "t": 1757245054.0,
+      "equity": 1000.636,
+      "balance": 1000.636,
+      "realized_pnl": 0.636,
+      "trades": 4,
+      "event": "CLOSE_TAKE_PROFIT"
+    },
+    {
+      "t": 1757245254.0,
+      "equity": 1000.797,
+      "balance": 1000.797,
+      "realized_pnl": 0.797,
+      "trades": 5,
+      "event": "CLOSE_TAKE_PROFIT"
+    },
+    {
+      "t": 1757245681.0,
+      "equity": 1000.839,
+      "balance": 1000.839,
+      "realized_pnl": 0.839,
+      "trades": 6,
+      "event": "CLOSE_QUICK_PROFIT"
+    },
+    {
+      "t": 1757245932.0,
+      "equity": 1000.9,
+      "balance": 1000.9,
+      "realized_pnl": 0.9,
+      "trades": 7,
+      "event": "CLOSE_QUICK_PROFIT"
+    },
+    {
+      "t": 1757246232.0,
+      "equity": 1000.987,
+      "balance": 1000.987,
+      "realized_pnl": 0.987,
+      "trades": 8,
+      "event": "CLOSE_CONVERGENCE"
+    },
+    {
+      "t": 1757246532.0,
+      "equity": 1001.052,
+      "balance": 1001.052,
+      "realized_pnl": 1.052,
+      "trades": 9,
+      "event": "CLOSE_QUICK_PROFIT"
+    }
+  ]
+}
