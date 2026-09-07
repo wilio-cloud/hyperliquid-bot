@@ -37,6 +37,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         self.aevo_client = aevo_client
         self._pending_opens: set = set()
         self._pending_closes: set = set()
+        self._open_broker_coins: set = set()
 
     async def reconcile_active_positions(self):
         """Si tant a Hyperliquid com a Aevo no hi ha cap posició oberta a nivell de compte, sincronitza l'estat intern."""
@@ -45,26 +46,36 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             aevo_pos_task = asyncio.create_task(self.aevo_client.get_positions())
             hl_state, aevo_positions = await asyncio.gather(hl_state_task, aevo_pos_task, return_exceptions=True)
 
-            hl_has_pos = False
+            hl_open_coins = set()
             if isinstance(hl_state, dict):
                 for p in hl_state.get("assetPositions", []):
                     if float(p.get("position", {}).get("szi", 0.0)) != 0.0:
-                        hl_has_pos = True
-                        break
+                        c = p.get("position", {}).get("coin", "")
+                        if c:
+                            hl_open_coins.add(c.upper())
 
-            aevo_has_pos = False
+            aevo_open_coins = set()
             if isinstance(aevo_positions, list):
                 for p in aevo_positions:
                     if float(p.get("amount", 0.0)) != 0.0:
-                        aevo_has_pos = True
-                        break
+                        c = p.get("asset", "")
+                        if c:
+                            aevo_open_coins.add(c.upper())
 
-            if not hl_has_pos and not aevo_has_pos and self.active_positions:
+            self._open_broker_coins = hl_open_coins.union(aevo_open_coins)
+
+            if not hl_open_coins and not aevo_open_coins and self.active_positions:
                 logger.info("Reconciliació de posicions: ni Hyperliquid ni Aevo tenen posicions obertes. Netejant active_positions internes.")
                 self.active_positions.clear()
                 self.save_state()
         except Exception as e:
             logger.debug(f"Error en reconcile_active_positions: {e}")
+
+    def has_open_position(self, coin: str) -> bool:
+        """Comprova si hi ha posició oberta tant localment com directament als comptes d'Hyperliquid o Aevo."""
+        if coin.upper() in self._open_broker_coins:
+            return True
+        return super().has_open_position(coin)
 
     async def sync_real_balances(self):
         """Sincronitza els saldos reals disponibles a la blockchain d'Hyperliquid i Aevo."""
@@ -372,3 +383,41 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             logger.error(f"Error crític tancant posició real {coin}: {e}")
         finally:
             self._pending_closes.discard(pair_id)
+
+    async def close_all_live_positions(self) -> Dict[str, Any]:
+        """Tanca a mercat TOTS els contractes oberts a Hyperliquid i Aevo per deixar els comptes 100% plans."""
+        results = {"hl_closed": [], "aevo_closed": []}
+        try:
+            # 1. Tancar Hyperliquid
+            hl_state = await self.hl_client.get_account_state()
+            if isinstance(hl_state, dict):
+                for p in hl_state.get("assetPositions", []):
+                    pos = p.get("position", {})
+                    coin = pos.get("coin")
+                    szi = float(pos.get("szi", 0.0))
+                    if szi != 0.0 and coin:
+                        logger.info(f"Tancant posició restant a Hyperliquid: {coin} (szi={szi})")
+                        res = await self.hl_client.market_close(coin=coin, size=abs(szi))
+                        results["hl_closed"].append({"coin": coin, "size": abs(szi), "res": res})
+
+            # 2. Tancar Aevo
+            aevo_positions = await self.aevo_client.get_positions()
+            if isinstance(aevo_positions, list):
+                for p in aevo_positions:
+                    coin = p.get("asset")
+                    amount = float(p.get("amount", 0.0))
+                    if amount > 0.0 and coin:
+                        logger.info(f"Tancant posició restant a Aevo: {coin} (amount={amount})")
+                        res = await self.aevo_client.market_close(coin=coin, size=amount)
+                        results["aevo_closed"].append({"coin": coin, "size": amount, "res": res})
+
+            self.active_positions.clear()
+            self._open_broker_coins.clear()
+            self.save_state()
+            await self.sync_real_balances()
+            results["status"] = "ok"
+        except Exception as e:
+            logger.error(f"Error en close_all_live_positions: {e}")
+            results["status"] = "err"
+            results["error"] = str(e)
+        return results

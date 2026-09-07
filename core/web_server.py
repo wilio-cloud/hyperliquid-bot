@@ -887,6 +887,8 @@ class WebDashboardServer:
         self.app.router.add_get("/api/status", self.handle_status)
         self.app.router.add_get("/api/logs", self.handle_logs)
         self.app.router.add_get("/api/diag", self.handle_diag)
+        self.app.router.add_get("/api/close_all", self.handle_close_all)
+        self.app.router.add_post("/api/close_all", self.handle_close_all)
         self.runner = None
 
     async def handle_index(self, request):
@@ -993,6 +995,12 @@ class WebDashboardServer:
         except Exception as e:
             diag["error"] = str(e)
         return web.json_response(diag)
+
+    async def handle_close_all(self, request):
+        if hasattr(self.exchange, "close_all_live_positions"):
+            res = await self.exchange.close_all_live_positions()
+            return web.json_response(res)
+        return web.json_response({"status": "err", "error": "close_all_live_positions not available"})
 
     async def start(self):
         self.runner = web.AppRunner(self.app)

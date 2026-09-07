@@ -197,17 +197,40 @@ class HyperliquidLiveClient:
 
     async def market_close(self, coin: str, size: Optional[float] = None, slippage: float = 0.02) -> Dict[str, Any]:
         """Tanca immediatament qualsevol posició oberta a mercat (Rollback de seguretat)."""
-        rounded_sz = self.round_size(coin, size) if size is not None else None
-        def _execute():
-            return self.exchange.market_close(
-                coin=coin.upper(),
-                sz=rounded_sz,
-                slippage=slippage,
-            )
         try:
-            return await asyncio.to_thread(_execute)
+            acc_state = await self.get_account_state()
+            current_sz = 0.0
+            szi = 0.0
+            for p in acc_state.get("assetPositions", []):
+                pos = p.get("position", {})
+                if pos.get("coin") == coin.upper():
+                    szi = float(pos.get("szi", 0.0))
+                    current_sz = abs(szi)
+                    break
+
+            if current_sz <= 0.0:
+                logger.info(f"Cap posició oberta per a {coin} a Hyperliquid per tancar.")
+                return {"status": "ok", "message": f"Cap posició oberta per a {coin}"}
+
+            close_sz = self.round_size(coin, size if size is not None else current_sz)
+            is_buy = (szi < 0.0) # Si estem Short (szi < 0), comprem per tancar. Si Long, venem.
+
+            all_mids = await asyncio.to_thread(self.info.all_mids)
+            mid_px = float(all_mids.get(coin.upper(), 0.0))
+            if mid_px <= 0.0:
+                return {"status": "err", "error": f"No s'ha pogut obtenir preu de mercat per a {coin}"}
+
+            agg_px = mid_px * (1.015 if is_buy else 0.985)
+            logger.info(f"Executant market_close a Hyperliquid per a {coin}: {'BUY' if is_buy else 'SELL'} {close_sz} @ {agg_px:.6f}")
+            return await self.place_order(
+                coin=coin,
+                is_buy=is_buy,
+                size=close_sz,
+                price=agg_px,
+                ioc=True,
+            )
         except Exception as e:
-            logger.error(f"Error market_close Hyperliquid: {e}")
+            logger.error(f"Error en market_close Hyperliquid per a {coin}: {e}")
             return {"status": "err", "error": str(e)}
 
     async def cancel_order(self, coin: str, oid: int) -> Dict[str, Any]:
