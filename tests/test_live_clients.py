@@ -167,3 +167,76 @@ def test_hyperliquid_order_error_detection():
             assert "Insufficient margin" in res["error"]
 
         asyncio.run(_test())
+
+def test_live_exchange_sequential_abort_when_hl_fails():
+    """Verifica que si Hyperliquid falla o expira, Aevo MAI és tocat (0 exposició direccional)."""
+    hl_mock = MagicMock(spec=HyperliquidLiveClient)
+    hl_mock.round_size.side_effect = lambda c, s: round(s, 2)
+    # Hyperliquid falla (ex: IOC expirat o tick size invàlid)
+    hl_mock.place_order = AsyncMock(return_value={"status": "err", "error": "Order expired IOC"})
+    hl_mock.market_close = AsyncMock(return_value={"status": "ok"})
+
+    aevo_mock = MagicMock(spec=AevoLiveClient)
+    aevo_mock.round_size.side_effect = lambda c, s: round(s, 2)
+    aevo_mock.place_order = AsyncMock(return_value={"status": "ok"})
+    aevo_mock.market_close = AsyncMock(return_value={"status": "ok"})
+
+    exchange = ArbitrageLiveExchange(
+        hl_client=hl_mock,
+        aevo_client=aevo_mock,
+        initial_hl_balance=500.0,
+        initial_bn_balance=500.0,
+        leverage=2.0,
+        state_file="/tmp/test_live_state_abort.json",
+    )
+    exchange.active_positions.clear()
+
+    sig = ArbitrageSignal(
+        coin="NEAR",
+        direction=ArbitrageDirection.SELL_HL_BUY_BN,
+        spread_pct=0.180,
+        hl_price=5.2,
+        bn_price=5.18,
+        timestamp=1000.0,
+    )
+
+    async def _run():
+        await exchange._execute_live_open(sig, size_usd=200.0, is_maker=False)
+
+    asyncio.run(_run())
+
+    # Verificacions estrictes:
+    # 1. Hyperliquid s'ha intentat
+    assert hl_mock.place_order.called
+    # 2. Aevo NO S'HA TOCAT MAI!
+    assert not aevo_mock.place_order.called
+    # 3. Cap posició oberta
+    assert len(exchange.active_positions) == 0
+
+def test_live_exchange_reconcile_positions_clears_when_no_real_positions():
+    """Verifica que reconcile_active_positions neteja posicions fantasmes quan els comptes reals estan plans."""
+    hl_mock = MagicMock(spec=HyperliquidLiveClient)
+    hl_mock.get_account_state = AsyncMock(return_value={"assetPositions": []})
+
+    aevo_mock = MagicMock(spec=AevoLiveClient)
+    aevo_mock.get_positions = AsyncMock(return_value=[])
+
+    exchange = ArbitrageLiveExchange(
+        hl_client=hl_mock,
+        aevo_client=aevo_mock,
+        initial_hl_balance=500.0,
+        initial_bn_balance=500.0,
+        leverage=2.0,
+        state_file="/tmp/test_live_state_reconcile.json",
+    )
+    # Simulem una posició fantasma en memòria
+    exchange.active_positions["DUMMY_POS"] = MagicMock()
+    assert len(exchange.active_positions) == 1
+
+    async def _run():
+        await exchange.reconcile_active_positions()
+
+    asyncio.run(_run())
+
+    # Ha de quedar netejat perquè ni HL ni Aevo tenen posicions
+    assert len(exchange.active_positions) == 0

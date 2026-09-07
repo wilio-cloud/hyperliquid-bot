@@ -271,10 +271,10 @@ class AevoLiveClient:
                 sz = float(pos.get("amount", 0))
                 side = pos.get("side", "")
                 if sz > 0:
-                    # Si estàvem BUY (Long), venem per tancar. Si estàvem SELL (Short), comprem per tancar.
-                    is_buy_to_close = side.lower() == "sell" or side.lower() == "short"
-                    # Preu extrem per omplir a mercat immediat
-                    limit_px = 9999999.0 if is_buy_to_close else 0.000001
+                    is_buy_to_close = side.lower() in ("sell", "short")
+                    # Preu de referència realista per no violar les bandes de preu d'Aevo
+                    raw_px = float(pos.get("mark_price") or pos.get("avg_entry_price") or 1.0)
+                    limit_px = raw_px * 1.03 if is_buy_to_close else raw_px * 0.97
                     close_sz = size if size is not None else sz
                     return await self.place_order(
                         coin=coin,

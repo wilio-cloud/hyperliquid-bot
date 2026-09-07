@@ -885,6 +885,7 @@ class WebDashboardServer:
         self.app = web.Application()
         self.app.router.add_get("/", self.handle_index)
         self.app.router.add_get("/api/status", self.handle_status)
+        self.app.router.add_get("/api/logs", self.handle_logs)
         self.runner = None
 
     async def handle_index(self, request):
@@ -964,6 +965,20 @@ class WebDashboardServer:
             "ny_session": ny_session_data,
             "equity_history": equity_history_data,
         })
+
+    async def handle_logs(self, request):
+        log_file = "trading_bot.log"
+        lines = []
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+                    all_lines = f.readlines()
+                    lines = all_lines[-150:]
+            except Exception as e:
+                lines = [f"Error llegint logs: {e}\n"]
+        else:
+            lines = ["Cap fitxer trading_bot.log trobat encara.\n"]
+        return web.Response(text="".join(lines), content_type="text/plain")
 
     async def start(self):
         self.runner = web.AppRunner(self.app)

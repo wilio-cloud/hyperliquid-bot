@@ -70,6 +70,20 @@ class HyperliquidLiveClient:
             return float(int(size))
         return round(size, decimals)
 
+    def round_price(self, coin: str, price: float) -> float:
+        """
+        Arrodoneix el preu segons les especificacions d'Hyperliquid:
+        - Màxim 5 xifres significatives
+        - Màxim 6 decimals
+        """
+        if price <= 0:
+            return price
+        import math
+        digits = 5
+        decimals = max(0, digits - int(math.floor(math.log10(abs(price)))) - 1)
+        decimals = min(decimals, 6)
+        return round(price, decimals)
+
     async def get_account_state(self) -> Dict[str, Any]:
         """Consulta l'estat complet del compte a Hyperliquid."""
         return await asyncio.to_thread(self.info.user_state, self.wallet_address)
@@ -123,6 +137,13 @@ class HyperliquidLiveClient:
         if rounded_sz <= 0:
             return {"status": "err", "error": f"Mida invàlida per a {coin}: {size}"}
 
+        # Collar de seguretat de 0.05% per a ordres IOC per assegurar fill immediat al millor preu
+        if ioc:
+            collar_px = price * (1.0005 if is_buy else 0.9995)
+            rounded_px = self.round_price(coin, collar_px)
+        else:
+            rounded_px = self.round_price(coin, price)
+
         tif = "Alo" if post_only else ("Ioc" if ioc else "Gtc")
         order_type = {"limit": {"tif": tif}}
 
@@ -131,13 +152,13 @@ class HyperliquidLiveClient:
                 name=coin.upper(),
                 is_buy=is_buy,
                 sz=rounded_sz,
-                limit_px=price,
+                limit_px=rounded_px,
                 order_type=order_type,
             )
 
         try:
             res = await asyncio.to_thread(_execute)
-            logger.info(f"Ordre Hyperliquid enviada {coin} {'BUY' if is_buy else 'SELL'} {rounded_sz} @ {price}: {res}")
+            logger.info(f"Ordre Hyperliquid enviada {coin} {'BUY' if is_buy else 'SELL'} {rounded_sz} @ {rounded_px}: {res}")
             
             # Verificació estricta de la resposta del motor d'Hyperliquid
             if isinstance(res, dict):

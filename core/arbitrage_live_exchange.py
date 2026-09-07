@@ -42,8 +42,8 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         """Si tant a Hyperliquid com a Aevo no hi ha cap posició oberta a nivell de compte, sincronitza l'estat intern."""
         try:
             hl_state_task = asyncio.create_task(self.hl_client.get_account_state())
-            aevo_state_task = asyncio.create_task(self.aevo_client.get_account_state())
-            hl_state, aevo_state = await asyncio.gather(hl_state_task, aevo_state_task, return_exceptions=True)
+            aevo_pos_task = asyncio.create_task(self.aevo_client.get_positions())
+            hl_state, aevo_positions = await asyncio.gather(hl_state_task, aevo_pos_task, return_exceptions=True)
 
             hl_has_pos = False
             if isinstance(hl_state, dict):
@@ -53,8 +53,8 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                         break
 
             aevo_has_pos = False
-            if isinstance(aevo_state, dict):
-                for p in aevo_state.get("positions", []):
+            if isinstance(aevo_positions, list):
+                for p in aevo_positions:
                     if float(p.get("amount", 0.0)) != 0.0:
                         aevo_has_pos = True
                         break
@@ -140,9 +140,10 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 f"Aevo: {'BUY' if aevo_is_buy else 'SELL'} {aevo_sz} @ {signal.bn_price}"
             )
 
-            # 2. Enviament simultani de les dues potes en paral·lel
-            hl_task = asyncio.create_task(
-                self.hl_client.place_order(
+            # 2. PAS A: Enviament de la pota primària (Hyperliquid Taker IOC)
+            logger.info(f"Enviant pota primària a Hyperliquid per a {coin}...")
+            try:
+                hl_res = await self.hl_client.place_order(
                     coin=coin,
                     is_buy=hl_is_buy,
                     size=hl_sz,
@@ -150,25 +151,37 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                     post_only=is_maker,
                     ioc=not is_maker,
                 )
-            )
-            aevo_task = asyncio.create_task(
-                self.aevo_client.place_order(
+            except Exception as e:
+                hl_res = {"status": "err", "error": str(e)}
+
+            hl_ok = isinstance(hl_res, dict) and hl_res.get("status") == "ok"
+
+            # Si Hyperliquid no s'omple o falla, avortem immediatament sense tocar Aevo (0 risc, 0 exposició)
+            if not hl_ok:
+                logger.warning(
+                    f"⚠️ [EXECUCIÓ AVORTADA] Pota Hyperliquid no omplerta per {coin} ({hl_res}). "
+                    f"Cancel·lant sense obrir a Aevo (0 exposició direccional)."
+                )
+                return
+
+            # 3. PAS B: Hyperliquid omplert! Enviament immediat de cobertura a Aevo
+            logger.info(f"Pota Hyperliquid omplerta per a {coin}. Enviant cobertura immediata a Aevo...")
+            try:
+                aevo_res = await self.aevo_client.place_order(
                     coin=coin,
                     is_buy=aevo_is_buy,
                     size=aevo_sz,
                     price=signal.bn_price,
-                    post_only=is_maker,
+                    post_only=False,
+                    reduce_only=False,
                 )
-            )
+            except Exception as e:
+                aevo_res = {"status": "err", "error": str(e)}
 
-            hl_res, aevo_res = await asyncio.gather(hl_task, aevo_task, return_exceptions=True)
-
-            # 3. Comprovació d'èxit de les dues potes
-            hl_ok = isinstance(hl_res, dict) and hl_res.get("status") == "ok"
             aevo_ok = isinstance(aevo_res, dict) and aevo_res.get("status") == "ok"
 
             # 4. CAS 1: Ambdues han tingut èxit -> Posició delta-neutral assegurada!
-            if hl_ok and aevo_ok:
+            if aevo_ok:
                 hl_fee_rate = self.hl_maker_fee if is_maker else self.hl_taker_fee
                 bn_fee_rate = self.bn_maker_fee if is_maker else self.bn_taker_fee
 
@@ -223,24 +236,13 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                     self.on_open_cb(position)
 
             # 5. CAS 2: ROLLBACK DE SEGURETAT (Anti-Unhedged Guard)
-            elif hl_ok and not aevo_ok:
+            else:
                 logger.error(
-                    f"🚨 [ALERTA DE SEGURETAT] Pota d'Aevo fallada ({aevo_res}) per {coin}. "
+                    f"🚨 [ALERTA DE SEGURETAT] Pota d'Aevo fallada ({aevo_res}) després d'omplir Hyperliquid per {coin}. "
                     f"Fent ROLLBACK IMMEDIAT a Hyperliquid per eliminar exposició direccional..."
                 )
                 await self.hl_client.market_close(coin=coin, size=hl_sz)
                 logger.info(f"🛡️ Rollback Hyperliquid completat per {coin}. Compte pla i protegit.")
-
-            elif aevo_ok and not hl_ok:
-                logger.error(
-                    f"🚨 [ALERTA DE SEGURETAT] Pota d'Hyperliquid fallada ({hl_res}) per {coin}. "
-                    f"Fent ROLLBACK IMMEDIAT a Aevo per eliminar exposició direccional..."
-                )
-                await self.aevo_client.market_close(coin=coin, size=aevo_sz)
-                logger.info(f"🛡️ Rollback Aevo completat per {coin}. Compte pla i protegit.")
-
-            else:
-                logger.warning(f"❌ Ambdues potes han fallat per {coin}: HL={hl_res}, Aevo={aevo_res}")
 
         except Exception as e:
             logger.error(f"Error crític en _execute_live_open per {coin}: {e}")
@@ -282,13 +284,12 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 f"HL px: {hl_exit_price:.4f} | Aevo px: {bn_exit_price:.4f}"
             )
 
-            # Enviament en paral·lel dels tancaments
-            # Per tancar HL: venem si estàvem Buy, comprem si estàvem Sell
             hl_is_buy_to_close = (pos.leg_hl.side == OrderSide.SELL)
             aevo_is_buy_to_close = (pos.leg_bn.side == OrderSide.SELL)
 
-            hl_task = asyncio.create_task(
-                self.hl_client.place_order(
+            # Tancament seqüencial: Primer tanquem Hyperliquid (Taker IOC)
+            try:
+                hl_res = await self.hl_client.place_order(
                     coin=coin,
                     is_buy=hl_is_buy_to_close,
                     size=pos.leg_hl.size,
@@ -296,19 +297,34 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                     post_only=is_maker,
                     ioc=not is_maker,
                 )
-            )
-            aevo_task = asyncio.create_task(
-                self.aevo_client.place_order(
+            except Exception as e:
+                hl_res = {"status": "err", "error": str(e)}
+
+            hl_ok = isinstance(hl_res, dict) and hl_res.get("status") == "ok"
+            if not hl_ok:
+                logger.warning(
+                    f"⚠️ Pota de tancament HL per {coin} no omplerta ({hl_res}). "
+                    f"Es reintentarà en el proper cicle."
+                )
+                return
+
+            # Hyperliquid tancat! Ara tanquem Aevo amb reduce_only
+            try:
+                aevo_res = await self.aevo_client.place_order(
                     coin=coin,
                     is_buy=aevo_is_buy_to_close,
                     size=pos.leg_bn.size,
                     price=bn_exit_price,
-                    post_only=is_maker,
+                    post_only=False,
                     reduce_only=True,
                 )
-            )
+            except Exception as e:
+                aevo_res = {"status": "err", "error": str(e)}
 
-            hl_res, aevo_res = await asyncio.gather(hl_task, aevo_task, return_exceptions=True)
+            aevo_ok = isinstance(aevo_res, dict) and aevo_res.get("status") == "ok"
+            if not aevo_ok:
+                logger.error(f"🚨 Error tancant Aevo ({aevo_res}). Forçant market_close a Aevo...")
+                await self.aevo_client.market_close(coin=coin, size=pos.leg_bn.size)
 
             # Actualització del registre local
             hl_fee_rate = self.hl_maker_fee if is_maker else self.hl_taker_fee
