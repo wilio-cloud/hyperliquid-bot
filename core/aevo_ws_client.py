@@ -42,7 +42,7 @@ class AevoWSClient:
         on_book_update: Optional[Callable[[OrderBookL2], None]] = None,
         on_funding_update: Optional[Callable[[Dict[str, float]], None]] = None,
     ):
-        self.coins = coins or ["BTC", "ETH", "SOL", "HYPE", "BNB", "XRP", "NEAR", "SUI"]
+        self.coins = coins or ["BTC", "ETH", "SOL", "HYPE", "AVAX", "DOGE", "NEAR", "SUI"]
         self.symbol_map = {c.upper(): f"{c.upper()}-PERP" for c in self.coins}
         self.reverse_map = {f"{c.upper()}-PERP": c.upper() for c in self.coins}
 

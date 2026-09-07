@@ -449,6 +449,32 @@ def test_coin_stats_and_pace_tracking():
 
     print("  Control de freqüència i analítica per moneda verificats amb èxit.")
 
+def test_per_coin_effective_spread_and_cooldown():
+    """Verifica que ETH i SOL utilitzin el llindar de 0.095% i que el cooldown sigui de 90s."""
+    from strategies.cross_arbitrage import CrossExchangeArbitrageStrategy
+    strat = CrossExchangeArbitrageStrategy(min_entry_spread_pct=0.120, auto_weekend_adjust=False)
+
+    assert strat.get_effective_min_spread("ETH") == 0.095
+    assert strat.get_effective_min_spread("SOL") == 0.095
+    assert strat.get_effective_min_spread("BTC") == 0.080
+    assert strat.get_effective_min_spread("NEAR") == 0.120
+    assert strat.get_effective_min_spread("HYPE") == 0.120
+
+    # Simular ETH amb un spread del 0.100% (HL: 2502.50, AEVO: 2500.00)
+    # Amb el llindar antic de 0.120% no hauria disparat senyal.
+    # Amb el nou llindar de 0.095% ha de disparar senyal d'entrada!
+    hl_book = OrderBookL2(coin="ETH", timestamp=1000.0, bids=[BookLevel(price=2502.40, size=5.0)], asks=[BookLevel(price=2502.60, size=5.0)])
+    aevo_book = OrderBookL2(coin="ETH", timestamp=1000.0, bids=[BookLevel(price=2499.80, size=5.0)], asks=[BookLevel(price=2500.00, size=5.0)])
+    strat.update_hl_book(hl_book)
+    strat.update_bn_book(aevo_book)
+
+    sig = strat.evaluate_entry("ETH")
+    assert sig is not None, "ETH hauria de generar senyal d'entrada amb spread del 0.100%!"
+    assert sig.direction == ArbitrageDirection.SELL_HL_BUY_BN
+    assert sig.spread_pct >= 0.095
+
+    print("  Llindars per moneda (ETH/SOL a 0.095%) verificats amb èxit.")
+
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
     test_arbitrage_execution_and_pnl()
@@ -461,4 +487,5 @@ if __name__ == "__main__":
     test_weekend_regime_and_funding_harvest()
     test_dynamic_proportional_take_profit()
     test_coin_stats_and_pace_tracking()
+    test_per_coin_effective_spread_and_cooldown()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")

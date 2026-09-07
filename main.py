@@ -159,15 +159,15 @@ class ArbitrageTradingBotApp:
             )
 
     def _on_pair_close(self, pos: ArbitragePosition, exit_reason: str, net_pnl: float):
-        # Pausa de seguretat de 3 minuts per evitar bucles d'alta freqüència
-        self.coin_cooldowns[pos.coin] = time.time() + 180.0
+        # Pausa de seguretat de 90 segons (1.5 minuts) per permetre flux sostingut de 8-10 op/h
+        self.coin_cooldowns[pos.coin] = time.time() + 90.0
         if self.headless:
             icon = "✅" if net_pnl > 0 else "❌"
             res_str = "GUANY" if net_pnl > 0 else "PÈRDUA"
             print(
                 f"  {icon} [ARB TANCAT {exit_reason}] {pos.coin} | {res_str}: {net_pnl:+.3f}$ | "
                 f"Funding: {pos.accumulated_funding:+.4f}$ | Comissions: {pos.total_fees:.4f}$ | "
-                f"Balanç Total: {self.exchange.total_balance_usd:.2f}$ (Cooldown 3m)"
+                f"Balanç Total: {self.exchange.total_balance_usd:.2f}$ (Cooldown 90s)"
             )
 
     def handle_hl_book(self, book: OrderBookL2):
@@ -265,6 +265,7 @@ class ArbitrageTradingBotApp:
                 bn_inner = ((bn_book.best_ask - bn_book.best_bid) / bn_book.mid_price) * 100.0 if (bn_book and bn_book.mid_price) else 0.0
                 max_inner = max(hl_inner, bn_inner)
 
+                coin_eff_spread = self.strategy.get_effective_min_spread(coin)
                 sig = self.strategy.evaluate_entry(coin)
                 if sig:
                     signal_type = "SIGNAL"
@@ -273,7 +274,7 @@ class ArbitrageTradingBotApp:
                 elif max_inner > self.strategy.max_book_spread_pct:
                     signal_type = "BLOCKED"
                     signal_status = f"⚠️ LLIBRE AMPLI ({max_inner:.2f}%)"
-                elif best_exec_pct >= (self.strategy.effective_min_spread * 0.65):
+                elif best_exec_pct >= (coin_eff_spread * 0.65):
                     signal_type = "APROP"
                     signal_status = f"⏳ APROP ({best_exec_pct:.3f}%)"
                 elif abs(info.annual_funding_diff_apr) >= 15.0:
@@ -385,10 +386,11 @@ class ArbitrageTradingBotApp:
                 info = self.strategy.calculate_spread_info(coin)
                 best_exec_pct = max(info.spread_sell_hl_buy_bn_pct, info.spread_buy_hl_sell_bn_pct) if info else 0.0
 
+                coin_eff_spread = self.strategy.get_effective_min_spread(coin)
                 if max_inner > self.strategy.max_book_spread_pct:
                     diag = "⚠️ Llibre Ampli (Filtre)"
                     diag_type = "PROTECTED"
-                elif best_exec_pct >= (self.strategy.effective_min_spread * 0.7):
+                elif best_exec_pct >= (coin_eff_spread * 0.7):
                     diag = "⏳ A prop del llindar"
                     diag_type = "NEAR"
                 elif coin == "BTC":
@@ -635,7 +637,7 @@ def main():
         if args.venue2 == "dydx":
             default_coins = ["BTC", "ETH", "SOL"]
         elif args.venue2 == "aevo":
-            default_coins = ["BTC", "ETH", "SOL", "HYPE", "BNB", "XRP", "NEAR", "SUI"]
+            default_coins = ["BTC", "ETH", "SOL", "HYPE", "AVAX", "DOGE", "NEAR", "SUI"]
         else:
             default_coins = ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
         coins = args.coins or default_coins

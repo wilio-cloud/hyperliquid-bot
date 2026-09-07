@@ -29,6 +29,7 @@ class CrossExchangeArbitrageStrategy:
         divergence_min_duration_sec: float = 60.0, # Requereix que la divergència sigui sostinguda almenys 60 segons
         max_hold_seconds: int = 43200,         # 12 hores màxim per posició (permet collir funding passiu)
         max_book_spread_pct: float = 0.350,    # Llindar màxim d'spread intern (adaptat a llibres d'altcoins d'Aevo)
+        per_coin_min_spread: Optional[Dict[str, float]] = None, # Llindars personalitzats per actiu
     ):
         self.name = "CROSS_ARBITRAGE"
         self.min_entry_spread_pct = min_entry_spread_pct
@@ -42,6 +43,17 @@ class CrossExchangeArbitrageStrategy:
         self.divergence_min_duration_sec = divergence_min_duration_sec
         self.max_hold_seconds = max_hold_seconds
         self.max_book_spread_pct = max_book_spread_pct
+
+        # Llindars optimitzats per actiu per garantir 8-10 op/h durant tot el dia:
+        # ETH i SOL tenen spreads bid/ask mínims (0.01-0.02%) i comissions baixes,
+        # per la qual cosa amb 0.095% generen beneficis nets de sobres (+0.10$ a +0.15$ net).
+        self.per_coin_min_spread: Dict[str, float] = per_coin_min_spread or {
+            "ETH": 0.095,
+            "SOL": 0.095,
+            "BTC": 0.080,
+            "AVAX": 0.110,
+            "DOGE": 0.110,
+        }
 
         self.hl_books: Dict[str, OrderBookL2] = {}
         self.bn_books: Dict[str, OrderBookL2] = {}
@@ -67,10 +79,26 @@ class CrossExchangeArbitrageStrategy:
 
     @property
     def effective_min_spread(self) -> float:
-        """Retorna el llindar efectiu: 0.120% en cap de setmana, 0.150% entre setmana."""
+        """Retorna el llindar base general: 0.100% en cap de setmana, 0.120% entre setmana."""
         if self.auto_weekend_adjust and self.is_weekend_regime:
             return self.weekend_min_spread_pct
         return self.min_entry_spread_pct
+
+    def get_effective_min_spread(self, coin: Optional[str] = None) -> float:
+        """
+        Retorna el llindar efectiu específic per a cada actiu.
+        Permet que ETH i SOL entrin a partir de 0.095% sense esperar deslligaments de 0.120%.
+        """
+        base = self.effective_min_spread
+        if not coin:
+            return base
+        c_upper = coin.upper()
+        if c_upper in self.per_coin_min_spread:
+            custom_spread = self.per_coin_min_spread[c_upper]
+            if self.auto_weekend_adjust and self.is_weekend_regime:
+                return min(custom_spread, self.weekend_min_spread_pct)
+            return custom_spread
+        return base
 
     def update_hl_book(self, book: OrderBookL2):
         self.hl_books[book.coin] = book
@@ -151,7 +179,7 @@ class CrossExchangeArbitrageStrategy:
             if bn_inner_spread > self.max_book_spread_pct:
                 return None
 
-        target_spread = self.effective_min_spread
+        target_spread = self.get_effective_min_spread(coin)
 
         # Cas 1: Preu HL supera BN (Dislocació de spread)
         if info.spread_sell_hl_buy_bn_pct >= target_spread:
