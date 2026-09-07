@@ -240,3 +240,35 @@ def test_live_exchange_reconcile_positions_clears_when_no_real_positions():
 
     # Ha de quedar netejat perquè ni HL ni Aevo tenen posicions
     assert len(exchange.active_positions) == 0
+
+def test_hyperliquid_set_leverage():
+    with patch("core.hyperliquid_live_client.Exchange") as mock_ex, patch("core.hyperliquid_live_client.Info") as mock_info:
+        client = HyperliquidLiveClient(
+            wallet_address=DUMMY_ACCOUNT.address,
+            agent_private_key=DUMMY_KEY,
+            testnet=True,
+        )
+        client.exchange.update_leverage = MagicMock(return_value={"status": "ok"})
+        res = asyncio.run(client.set_leverage("HYPE", leverage=2, is_cross=True))
+        assert res.get("status") == "ok"
+        client.exchange.update_leverage.assert_called_once_with(leverage=2, name="HYPE", is_cross=True)
+
+def test_configure_all_leverage():
+    hl_mock = MagicMock(spec=HyperliquidLiveClient)
+    hl_mock.set_leverage = AsyncMock(return_value={"status": "ok"})
+    aevo_mock = MagicMock(spec=AevoLiveClient)
+    aevo_mock.set_leverage = AsyncMock(return_value={"status": "ok"})
+
+    exchange = ArbitrageLiveExchange(
+        hl_client=hl_mock,
+        aevo_client=aevo_mock,
+        initial_hl_balance=500.0,
+        initial_bn_balance=500.0,
+        leverage=2.0,
+        state_file="/tmp/test_live_state_lev.json",
+    )
+    res = asyncio.run(exchange.configure_all_leverage(leverage=2))
+    assert res.get("status") == "ok"
+    assert res.get("leverage") == 2
+    assert hl_mock.set_leverage.call_count == 6
+    assert aevo_mock.set_leverage.call_count == 6

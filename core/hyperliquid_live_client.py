@@ -118,6 +118,23 @@ class HyperliquidLiveClient:
             logger.error(f"Error consultant balanç a Hyperliquid: {e}")
             return 0.0
 
+    async def set_leverage(self, coin: str, leverage: int = 2, is_cross: bool = True) -> Dict[str, Any]:
+        """Ajusta el palanquejament per a un actiu a Hyperliquid."""
+        def _execute():
+            return self.exchange.update_leverage(
+                leverage=int(leverage),
+                name=coin.upper(),
+                is_cross=is_cross,
+            )
+
+        try:
+            res = await asyncio.to_thread(_execute)
+            logger.info(f"Palanquejament Hyperliquid ajustat per a {coin} ({leverage}x, Cross={is_cross}): {res}")
+            return res if isinstance(res, dict) else {"status": "ok", "raw": res}
+        except Exception as e:
+            logger.error(f"Error ajustant palanquejament Hyperliquid per a {coin}: {e}")
+            return {"status": "err", "error": str(e)}
+
     async def place_order(
         self,
         coin: str,

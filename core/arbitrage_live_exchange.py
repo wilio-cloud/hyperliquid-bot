@@ -38,6 +38,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         self._pending_opens: set = set()
         self._pending_closes: set = set()
         self._open_broker_coins: set = set()
+        self._configured_leverage_coins: set = set()
 
     async def reconcile_active_positions(self):
         """Si tant a Hyperliquid com a Aevo no hi ha cap posició oberta a nivell de compte, sincronitza l'estat intern."""
@@ -101,6 +102,29 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         except Exception as e:
             logger.error(f"Error sincronitzant saldos reals: {e}")
 
+    async def configure_all_leverage(self, leverage: Optional[int] = None) -> Dict[str, Any]:
+        """Configura el palanquejament desitjat (ex: 2x) i Cross Margin a Hyperliquid i Aevo per a tots els mercats."""
+        lev = int(leverage or self.leverage or 2)
+        results = {"status": "ok", "leverage": lev, "hl": {}, "aevo": {}}
+        coins = ["SOL", "HYPE", "NEAR", "PUMP", "SUI", "DOGE"]
+        logger.info(f"⚡ [LEVERAGE] Aplicant {lev}x Cross Margin a Hyperliquid i Aevo per a {coins}...")
+        for coin in coins:
+            try:
+                hl_res = await self.hl_client.set_leverage(coin, leverage=lev, is_cross=True)
+                results["hl"][coin] = hl_res
+            except Exception as e:
+                results["hl"][coin] = {"status": "err", "error": str(e)}
+
+            try:
+                aevo_res = await self.aevo_client.set_leverage(coin, leverage=lev)
+                results["aevo"][coin] = aevo_res
+            except Exception as e:
+                results["aevo"][coin] = {"status": "err", "error": str(e)}
+
+        self._configured_leverage_coins.update(coins)
+        logger.info(f"⚡ [LEVERAGE] Resultats de configuració ({lev}x): {results}")
+        return results
+
     def open_arbitrage_position(
         self,
         signal: ArbitrageSignal,
@@ -134,6 +158,15 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         coin = signal.coin
         pair_id = f"ARB_{coin}_LIVE_{int(time.time() * 1000)}"
         try:
+            # Assegurar palanquejament 2x abans d'obrir si no s'ha configurat encara
+            if coin not in self._configured_leverage_coins:
+                try:
+                    await self.hl_client.set_leverage(coin, leverage=int(self.leverage), is_cross=True)
+                    await self.aevo_client.set_leverage(coin, leverage=int(self.leverage))
+                    self._configured_leverage_coins.add(coin)
+                except Exception as le:
+                    logger.debug(f"Error ajustant palanquejament previ per {coin}: {le}")
+
             # 1. Determinació de costats
             if signal.direction == ArbitrageDirection.SELL_HL_BUY_BN:
                 hl_is_buy = False

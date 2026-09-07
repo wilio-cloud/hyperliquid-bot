@@ -889,6 +889,8 @@ class WebDashboardServer:
         self.app.router.add_get("/api/diag", self.handle_diag)
         self.app.router.add_get("/api/close_all", self.handle_close_all)
         self.app.router.add_post("/api/close_all", self.handle_close_all)
+        self.app.router.add_get("/api/set_leverage", self.handle_set_leverage)
+        self.app.router.add_post("/api/set_leverage", self.handle_set_leverage)
         self.runner = None
 
     async def handle_index(self, request):
@@ -1002,6 +1004,17 @@ class WebDashboardServer:
             res = await self.exchange.close_all_live_positions()
             return web.json_response(res)
         return web.json_response({"status": "err", "error": "close_all_live_positions not available"})
+
+    async def handle_set_leverage(self, request):
+        lev_str = request.query.get("leverage", "2")
+        try:
+            lev = int(lev_str)
+        except ValueError:
+            lev = 2
+        if hasattr(self.exchange, "configure_all_leverage"):
+            res = await self.exchange.configure_all_leverage(leverage=lev)
+            return web.json_response(res)
+        return web.json_response({"status": "err", "error": "configure_all_leverage not available"})
 
     async def start(self):
         self.runner = web.AppRunner(self.app)

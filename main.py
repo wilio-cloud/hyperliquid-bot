@@ -597,6 +597,11 @@ class ArbitrageTradingBotApp:
         if isinstance(self.exchange, ArbitrageLiveExchange):
             logger.info("⚡ [MODE REAL] Verificant i sincronitzant saldos reals amb la blockchain...")
             await self.exchange.sync_real_balances()
+            logger.info("⚡ [MODE REAL] Configurant palanquejament a 2x a Hyperliquid i Aevo...")
+            try:
+                await self.exchange.configure_all_leverage()
+            except Exception as e:
+                logger.error(f"Error configurant palanquejament inicial: {e}")
             self._balance_sync_task = asyncio.create_task(self._run_balance_sync_loop())
 
         await self.hl_ws.start()
