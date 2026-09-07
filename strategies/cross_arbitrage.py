@@ -239,21 +239,30 @@ class CrossExchangeArbitrageStrategy:
             # Càlcul del PnL net projectat (utilitzant comissions Maker per a sortida ordenada per límit):
             hl_gross = (pos.leg_hl.entry_price - hl_exit_px) * pos.leg_hl.size
             bn_gross = (bn_exit_px - pos.leg_bn.entry_price) * pos.leg_bn.size
+            
+            venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
+            venue2_maker_rate = 0.00000 if "AEVO" in venue2_name else 0.00020
             hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00010  # Maker exit 0.010%
-            bn_exit_fee = pos.leg_bn.size * bn_exit_px * 0.00020  # Maker exit 0.020%
+            bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_maker_rate
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
-            # 1. Take profit anticipat si funding o inversió de spread generen un guany substancial
-            if projected_net_pnl >= self.take_profit_usd:
+            order_size_usd = pos.leg_hl.size * pos.leg_hl.entry_price
+            # Take profit proporcional (com ahir: 0.05% net del valor de l'ordre, mínim 0.15$)
+            target_tp = max(0.15, order_size_usd * 0.0005)
+            if self.take_profit_usd and 0 < self.take_profit_usd < target_tp:
+                target_tp = self.take_profit_usd
+
+            target_min_profit = min(self.min_profit_usd, max(0.08, order_size_usd * 0.00025))
+
+            # 1. Take profit anticipat si el benefici net arriba a l'objectiu (tancament ràpid en 1-2m)
+            if projected_net_pnl >= target_tp:
                 return ("TAKE_PROFIT_TARGET", hl_exit_px, bn_exit_px)
 
-            # 2. Convergència reeixida NOMÉS si el benefici net és positiu (cobreix comissions + marge)
+            # 2. Convergència reeixida NOMÉS si el benefici net és positiu
             if current_spread_to_close <= self.target_exit_spread_pct:
-                if projected_net_pnl >= self.min_profit_usd:
+                if projected_net_pnl >= target_min_profit:
                     return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
-                # Si no arriba al marge mínim, com que la posició és delta-neutral (0 risc direccional),
-                # no tanquem amb pèrdua: mantenim per cobrar funding o esperar una oscil·lació millor
 
             # 3. Stop loss de divergència catastròfica amb filtre de persistència (evita tancar en metxes de soroll)
             if current_spread_to_close >= (pos.entry_spread_pct + self.max_divergence_pct):
@@ -275,16 +284,26 @@ class CrossExchangeArbitrageStrategy:
             # Càlcul del PnL net projectat:
             hl_gross = (hl_exit_px - pos.leg_hl.entry_price) * pos.leg_hl.size
             bn_gross = (pos.leg_bn.entry_price - bn_exit_px) * pos.leg_bn.size
+            
+            venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
+            venue2_maker_rate = 0.00000 if "AEVO" in venue2_name else 0.00020
             hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00010
-            bn_exit_fee = pos.leg_bn.size * bn_exit_px * 0.00020
+            bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_maker_rate
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
-            if projected_net_pnl >= self.take_profit_usd:
+            order_size_usd = pos.leg_hl.size * pos.leg_hl.entry_price
+            target_tp = max(0.15, order_size_usd * 0.0005)
+            if self.take_profit_usd and 0 < self.take_profit_usd < target_tp:
+                target_tp = self.take_profit_usd
+
+            target_min_profit = min(self.min_profit_usd, max(0.08, order_size_usd * 0.00025))
+
+            if projected_net_pnl >= target_tp:
                 return ("TAKE_PROFIT_TARGET", hl_exit_px, bn_exit_px)
 
             if current_spread_to_close <= self.target_exit_spread_pct:
-                if projected_net_pnl >= self.min_profit_usd:
+                if projected_net_pnl >= target_min_profit:
                     return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
 
             if current_spread_to_close >= (pos.entry_spread_pct + self.max_divergence_pct):

@@ -359,6 +359,43 @@ def test_weekend_regime_and_funding_harvest():
     assert "Funding Harvest" in sig.reason
     print("  Règim de cap de setmana i Funding Harvest verificats amb èxit.")
 
+def test_dynamic_proportional_take_profit():
+    """Verifica que el TP s'escala proporcionalment a la mida d'ordre (com ahir)."""
+    exchange = ArbitragePaperExchange(
+        initial_hl_balance=500.0,
+        initial_bn_balance=500.0,
+        venue2_name="AEVO",
+    )
+    strat = CrossExchangeArbitrageStrategy(
+        min_entry_spread_pct=0.120,
+        target_exit_spread_pct=0.010,
+    )
+
+    # Ordre de 300$ a SOL
+    signal = ArbitrageSignal(
+        coin="SOL",
+        direction=ArbitrageDirection.SELL_HL_BUY_BN,
+        hl_price=100.20,
+        bn_price=100.00,
+        spread_pct=0.200,
+    )
+    pos = exchange.open_arbitrage_position(signal, size_usd=300.0)
+    assert pos is not None
+
+    # Simulem que l'spread es redueix ràpidament: HL ask 100.05, BN bid 100.00 (queda 0.050% spread)
+    # Gross = (100.20 - 100.05)*3.0 = 0.45$
+    # Fees anada i tornada a Aevo = ~0.21$
+    # Net = 0.45$ - 0.21$ = +0.24$ >= target_tp (0.15$)
+    hl_book = OrderBookL2(coin="SOL", timestamp=2000.0, bids=[BookLevel(price=100.04, size=10.0)], asks=[BookLevel(price=100.05, size=10.0)])
+    bn_book = OrderBookL2(coin="SOL", timestamp=2000.0, bids=[BookLevel(price=100.00, size=10.0)], asks=[BookLevel(price=100.01, size=10.0)])
+    strat.update_hl_book(hl_book)
+    strat.update_bn_book(bn_book)
+
+    exit_res = strat.check_exit(pos)
+    assert exit_res is not None
+    assert exit_res[0] == "TAKE_PROFIT_TARGET", "Hauria d'haver executat TAKE_PROFIT_TARGET immediatament!"
+    print("  Take Profit dinàmic proporcional verificat amb èxit.")
+
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
     test_arbitrage_execution_and_pnl()
@@ -369,4 +406,5 @@ if __name__ == "__main__":
     test_dynamic_position_sizing()
     test_dashboard_signal_status_accuracy()
     test_weekend_regime_and_funding_harvest()
+    test_dynamic_proportional_take_profit()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")
