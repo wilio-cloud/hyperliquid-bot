@@ -38,6 +38,34 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         self._pending_opens: set = set()
         self._pending_closes: set = set()
 
+    async def reconcile_active_positions(self):
+        """Si tant a Hyperliquid com a Aevo no hi ha cap posició oberta a nivell de compte, sincronitza l'estat intern."""
+        try:
+            hl_state_task = asyncio.create_task(self.hl_client.get_account_state())
+            aevo_state_task = asyncio.create_task(self.aevo_client.get_account_state())
+            hl_state, aevo_state = await asyncio.gather(hl_state_task, aevo_state_task, return_exceptions=True)
+
+            hl_has_pos = False
+            if isinstance(hl_state, dict):
+                for p in hl_state.get("assetPositions", []):
+                    if float(p.get("position", {}).get("szi", 0.0)) != 0.0:
+                        hl_has_pos = True
+                        break
+
+            aevo_has_pos = False
+            if isinstance(aevo_state, dict):
+                for p in aevo_state.get("positions", []):
+                    if float(p.get("amount", 0.0)) != 0.0:
+                        aevo_has_pos = True
+                        break
+
+            if not hl_has_pos and not aevo_has_pos and self.active_positions:
+                logger.info("Reconciliació de posicions: ni Hyperliquid ni Aevo tenen posicions obertes. Netejant active_positions internes.")
+                self.active_positions.clear()
+                self.save_state()
+        except Exception as e:
+            logger.debug(f"Error en reconcile_active_positions: {e}")
+
     async def sync_real_balances(self):
         """Sincronitza els saldos reals disponibles a la blockchain d'Hyperliquid i Aevo."""
         try:
@@ -50,10 +78,14 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             if isinstance(aevo_bal, (int, float)) and aevo_bal > 0:
                 self.bn_balance_usd = float(aevo_bal)
 
+            if not self.closed_positions and not self.active_positions:
+                self.initial_total_balance = self.total_balance_usd
+
             logger.info(
                 f"Saldos reals sincronitzats: Hyperliquid = {self.hl_balance_usd:.2f}$ | "
                 f"Aevo = {self.bn_balance_usd:.2f}$ | Total = {self.total_balance_usd:.2f}$"
             )
+            await self.reconcile_active_positions()
             self.save_state()
         except Exception as e:
             logger.error(f"Error sincronitzant saldos reals: {e}")

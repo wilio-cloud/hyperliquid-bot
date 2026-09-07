@@ -75,12 +75,31 @@ class HyperliquidLiveClient:
         return await asyncio.to_thread(self.info.user_state, self.wallet_address)
 
     async def get_balance(self) -> float:
-        """Retorna el saldo disponible de marge en USD (accountValue)."""
+        """Retorna el saldo total disponible de marge en USD a Hyperliquid (Perps + Spot/Unified)."""
         try:
             state = await self.get_account_state()
             margin_summary = state.get("marginSummary", {})
             account_value = float(margin_summary.get("accountValue", 0.0))
-            return account_value
+            withdrawable = float(state.get("withdrawable", 0.0))
+
+            # Consulta de saldo Spot (spotClearinghouseState) per a comptes Unified o USDC a Spot
+            spot_usdc = 0.0
+            try:
+                spot_state = await asyncio.to_thread(self.info.spot_user_state, self.wallet_address)
+                for b in spot_state.get("balances", []):
+                    if b.get("coin") == "USDC":
+                        spot_usdc = float(b.get("total", 0.0))
+                        break
+            except Exception as e:
+                logger.debug(f"No s'ha pogut consultar spot state a Hyperliquid: {e}")
+
+            # Saldo total disponible per operar
+            total_bal = max(account_value + spot_usdc, withdrawable, account_value)
+            logger.info(
+                f"Balanç Hyperliquid obtingut: Perps={account_value:.2f}$, "
+                f"SpotUSDC={spot_usdc:.2f}$, Withdrawable={withdrawable:.2f}$ -> Total={total_bal:.2f}$"
+            )
+            return total_bal
         except Exception as e:
             logger.error(f"Error consultant balanç a Hyperliquid: {e}")
             return 0.0
