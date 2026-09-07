@@ -45,14 +45,15 @@ class CrossExchangeArbitrageStrategy:
         self.max_book_spread_pct = max_book_spread_pct
 
         # Llindars optimitzats per actiu per garantir 8-10 op/h durant tot el dia:
-        # ETH, SOL, NEAR i HYPE tenen bona liquiditat i comissions baixes,
+        # ETH, SOL, NEAR, HYPE i XRP tenen bona liquiditat i comissions baixes,
         # per la qual cosa amb 0.095% generen beneficis nets de sobres (+0.10$ a +0.16$ net).
+        # PUMP té spread una mica més ampli (0.21%), per tant 0.110% és òptim.
         self.per_coin_min_spread: Dict[str, float] = per_coin_min_spread or {
             "ETH": 0.095,
             "SOL": 0.095,
             "BTC": 0.080,
-            "AVAX": 0.110,
-            "DOGE": 0.110,
+            "XRP": 0.095,
+            "PUMP": 0.110,
             "NEAR": 0.095,
             "HYPE": 0.095,
         }
