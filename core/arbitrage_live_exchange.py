@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from core.arbitrage_models import ArbitrageDirection, ArbitrageLeg, ArbitragePosition, ArbitrageSignal
 from core.arbitrage_paper_exchange import ArbitragePaperExchange
 from core.hyperliquid_live_client import HyperliquidLiveClient
