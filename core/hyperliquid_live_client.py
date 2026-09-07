@@ -18,6 +18,12 @@ COIN_SZ_DECIMALS = {
     "SUI": 1,
     "DOGE": 0,
     "PUMP": 0,
+    "AVAX": 2,
+    "LINK": 1,
+    "ARB": 1,
+    "OP": 1,
+    "TIA": 1,
+    "INJ": 1,
 }
 
 class HyperliquidLiveClient:

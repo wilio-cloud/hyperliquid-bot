@@ -10,13 +10,13 @@ from strategies.cross_arbitrage import CrossExchangeArbitrageStrategy
 def test_spread_calculation_and_signal():
     strat = CrossExchangeArbitrageStrategy(min_entry_spread_pct=0.100, target_exit_spread_pct=0.015)
     
-    # Simulem preus on Hyperliquid és més car: HL mid 80160, BN mid 80000
-    # Spread ~ 0.20%
+    # Simulem preus on Hyperliquid és més car: HL mid 80250, BN mid 80000
+    # Spread ~ 0.31%
     hl_book = OrderBookL2(
         coin="BTC",
         timestamp=1000.0,
-        bids=[BookLevel(price=80159.0, size=1.0)],
-        asks=[BookLevel(price=80161.0, size=1.0)],
+        bids=[BookLevel(price=80250.0, size=1.0)],
+        asks=[BookLevel(price=80252.0, size=1.0)],
     )
     bn_book = OrderBookL2(
         coin="BTC",
@@ -32,13 +32,13 @@ def test_spread_calculation_and_signal():
 
     info = strat.calculate_spread_info("BTC")
     assert info is not None
-    # HL bid (80159) vs BN ask (80001) -> diferència positiva = 158$ (~0.197%)
+    # HL bid (80250) vs BN ask (80001) -> diferència positiva = 249$ (~0.311%)
     assert info.spread_sell_hl_buy_bn_pct > 0.100
 
     signal = strat.evaluate_entry("BTC")
     assert signal is not None
     assert signal.direction == ArbitrageDirection.SELL_HL_BUY_BN
-    assert signal.hl_price == 80159.0
+    assert signal.hl_price == 80250.0
     assert signal.bn_price == 80001.0
 
 def test_arbitrage_execution_and_pnl():
@@ -370,23 +370,24 @@ def test_dynamic_proportional_take_profit():
     strat = CrossExchangeArbitrageStrategy(
         min_entry_spread_pct=0.120,
         target_exit_spread_pct=0.010,
+        take_profit_usd=0.20,
     )
 
-    # Ordre de 300$ a SOL
+    # Ordre de 300$ a SOL amb spread realista del 0.35%
     signal = ArbitrageSignal(
         coin="SOL",
         direction=ArbitrageDirection.SELL_HL_BUY_BN,
-        hl_price=100.20,
+        hl_price=100.35,
         bn_price=100.00,
-        spread_pct=0.200,
+        spread_pct=0.350,
     )
     pos = exchange.open_arbitrage_position(signal, size_usd=300.0)
     assert pos is not None
 
     # Simulem que l'spread es redueix ràpidament: HL ask 100.05, BN bid 100.00 (queda 0.050% spread)
-    # Gross = (100.20 - 100.05)*3.0 = 0.45$
-    # Fees anada i tornada a Aevo = ~0.21$
-    # Net = 0.45$ - 0.21$ = +0.24$ >= target_tp (0.15$)
+    # Gross = (100.35 - 100.05)*3.0 = 0.90$
+    # Fees anada i tornada = ~0.43$
+    # Net = 0.90$ - 0.43$ = +0.47$ >= target_tp (0.45$)
     hl_book = OrderBookL2(coin="SOL", timestamp=2000.0, bids=[BookLevel(price=100.04, size=10.0)], asks=[BookLevel(price=100.05, size=10.0)])
     bn_book = OrderBookL2(coin="SOL", timestamp=2000.0, bids=[BookLevel(price=100.00, size=10.0)], asks=[BookLevel(price=100.01, size=10.0)])
     strat.update_hl_book(hl_book)
@@ -450,30 +451,32 @@ def test_coin_stats_and_pace_tracking():
     print("  Control de freqüència i analítica per moneda verificats amb èxit.")
 
 def test_per_coin_effective_spread_and_cooldown():
-    """Verifica que ETH, SOL, NEAR, HYPE utilitzin el llindar de 0.095%, PUMP 0.150% i BTC 0.080%."""
+    """Verifica que ETH, SOL, NEAR, HYPE, AVAX, LINK i PUMP utilitzin els nous llindars que garanteixen beneficis reals."""
     from strategies.cross_arbitrage import CrossExchangeArbitrageStrategy
-    strat = CrossExchangeArbitrageStrategy(min_entry_spread_pct=0.120, auto_weekend_adjust=False)
+    strat = CrossExchangeArbitrageStrategy(min_entry_spread_pct=0.280, auto_weekend_adjust=False)
 
-    assert strat.get_effective_min_spread("ETH") == 0.095
-    assert strat.get_effective_min_spread("SOL") == 0.095
-    assert strat.get_effective_min_spread("BTC") == 0.080
-    assert strat.get_effective_min_spread("NEAR") == 0.095
-    assert strat.get_effective_min_spread("HYPE") == 0.095
-    assert strat.get_effective_min_spread("PUMP") == 0.150
+    assert strat.get_effective_min_spread("ETH") == 0.240
+    assert strat.get_effective_min_spread("SOL") == 0.240
+    assert strat.get_effective_min_spread("BTC") == 0.200
+    assert strat.get_effective_min_spread("NEAR") == 0.250
+    assert strat.get_effective_min_spread("HYPE") == 0.250
+    assert strat.get_effective_min_spread("PUMP") == 0.350
+    assert strat.get_effective_min_spread("AVAX") == 0.250
+    assert strat.get_effective_min_spread("LINK") == 0.250
 
-    # Simular ETH amb un spread del 0.100% (HL: 2502.50, AEVO: 2500.00)
-    # Amb el nou llindar de 0.095% ha de disparar senyal d'entrada!
-    hl_book = OrderBookL2(coin="ETH", timestamp=1000.0, bids=[BookLevel(price=2502.40, size=5.0)], asks=[BookLevel(price=2502.60, size=5.0)])
+    # Simular ETH amb un spread del 0.260% (HL: 2506.50, AEVO: 2500.00)
+    # Amb el nou llindar de 0.240% ha de disparar senyal d'entrada!
+    hl_book = OrderBookL2(coin="ETH", timestamp=1000.0, bids=[BookLevel(price=2506.50, size=5.0)], asks=[BookLevel(price=2507.00, size=5.0)])
     aevo_book = OrderBookL2(coin="ETH", timestamp=1000.0, bids=[BookLevel(price=2499.80, size=5.0)], asks=[BookLevel(price=2500.00, size=5.0)])
     strat.update_hl_book(hl_book)
     strat.update_bn_book(aevo_book)
 
     sig = strat.evaluate_entry("ETH")
-    assert sig is not None, "ETH hauria de generar senyal d'entrada amb spread del 0.100%!"
+    assert sig is not None, "ETH hauria de generar senyal d'entrada amb spread del 0.260%!"
     assert sig.direction == ArbitrageDirection.SELL_HL_BUY_BN
-    assert sig.spread_pct >= 0.095
+    assert sig.spread_pct >= 0.240
 
-    print("  Llindars per moneda (ETH/SOL/NEAR/HYPE a 0.095%, PUMP 0.150%) verificats amb èxit.")
+    print("  Llindars per moneda verificats amb èxit.")
 
 def test_time_based_exit_guards_never_exit_at_loss():
     """Verifica que el bot MAI surti en pèrdua per temps (eliminació de TIMEOUT_RECYCLE i MAX_HOLD_RELEASE)."""
@@ -485,16 +488,16 @@ def test_time_based_exit_guards_never_exit_at_loss():
         coin="ETH",
         direction=ArbitrageDirection.SELL_HL_BUY_BN,
         entry_time=time.time() - 1800.0,
-        entry_spread_pct=0.100,
-        leg_hl=ArbitrageLeg(coin="ETH", side=OrderSide.SELL, entry_price=2500.0, size=0.1, size_usd=250.0, venue="HYPERLIQUID"),
-        leg_bn=ArbitrageLeg(coin="ETH", side=OrderSide.BUY, entry_price=2497.5, size=0.1, size_usd=249.75, venue="AEVO"),
-        total_fees=0.17,
+        entry_spread_pct=0.400,
+        leg_hl=ArbitrageLeg(coin="ETH", side=OrderSide.SELL, entry_price=2505.0, size=0.1, size_usd=250.5, venue="HYPERLIQUID"),
+        leg_bn=ArbitrageLeg(coin="ETH", side=OrderSide.BUY, entry_price=2495.0, size=0.1, size_usd=249.5, venue="AEVO"),
+        total_fees=0.20,
     )
 
-    # Simular llibres on el spread actual generaria pèrdua (-0.20$)
-    # HL ask = 2501.0 (recompra a pèrdua), Aevo bid = 2497.0 (venda a pèrdua)
-    hl_book = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2500.8, size=5.0)], asks=[BookLevel(price=2501.0, size=5.0)])
-    aevo_book = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2497.0, size=5.0)], asks=[BookLevel(price=2497.2, size=5.0)])
+    # Simular llibres on el spread actual generaria pèrdua
+    # HL ask = 2506.0 (recompra a pèrdua), Aevo bid = 2494.0 (venda a pèrdua)
+    hl_book = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2505.8, size=5.0)], asks=[BookLevel(price=2506.0, size=5.0)])
+    aevo_book = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2494.0, size=5.0)], asks=[BookLevel(price=2494.2, size=5.0)])
     strat.update_hl_book(hl_book)
     strat.update_bn_book(aevo_book)
 
@@ -502,10 +505,10 @@ def test_time_based_exit_guards_never_exit_at_loss():
     exit_eval = strat.check_exit(pos)
     assert exit_eval is None, "El bot NO ha de tancar en pèrdua per temps sota cap concepte!"
 
-    # Ara simulem que porta > 5 minuts (400s) i el spread ha convergit donant un guany ràpid de +0.06$
+    # Ara simulem que porta > 5 minuts (400s) i el spread ha convergit donant un guany net real (> +0.20$)
     pos.entry_time = time.time() - 400.0
-    hl_book_win = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2498.4, size=5.0)], asks=[BookLevel(price=2498.5, size=5.0)])
-    aevo_book_win = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2498.4, size=5.0)], asks=[BookLevel(price=2498.5, size=5.0)])
+    hl_book_win = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2499.9, size=5.0)], asks=[BookLevel(price=2500.0, size=5.0)])
+    aevo_book_win = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2500.0, size=5.0)], asks=[BookLevel(price=2500.1, size=5.0)])
     strat.update_hl_book(hl_book_win)
     strat.update_bn_book(aevo_book_win)
 

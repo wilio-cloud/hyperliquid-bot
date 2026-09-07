@@ -21,6 +21,12 @@ AEVO_INSTRUMENTS = {
     "PUMP": {"id": 82182, "amount_decimals": 0, "price_decimals": 6},
     "SUI": {"id": 17791, "amount_decimals": 1, "price_decimals": 4},
     "DOGE": {"id": 11969, "amount_decimals": 0, "price_decimals": 5},
+    "AVAX": {"id": 9060, "amount_decimals": 0, "price_decimals": 3},
+    "LINK": {"id": 8494, "amount_decimals": 2, "price_decimals": 3},
+    "ARB": {"id": 7349, "amount_decimals": 1, "price_decimals": 4},
+    "OP": {"id": 7348, "amount_decimals": 1, "price_decimals": 4},
+    "TIA": {"id": 8588, "amount_decimals": 0, "price_decimals": 4},
+    "INJ": {"id": 10009, "amount_decimals": 1, "price_decimals": 3},
 }
 
 AEVO_DOMAINS = {

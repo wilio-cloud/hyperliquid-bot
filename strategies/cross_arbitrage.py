@@ -57,6 +57,12 @@ class CrossExchangeArbitrageStrategy:
             "HYPE": 0.250,
             "SUI": 0.250,
             "DOGE": 0.300,
+            "AVAX": 0.250,
+            "LINK": 0.250,
+            "ARB": 0.250,
+            "OP": 0.250,
+            "TIA": 0.260,
+            "INJ": 0.260,
         }
 
         self.hl_books: Dict[str, OrderBookL2] = {}
