@@ -990,6 +990,7 @@ class WebDashboardServer:
                 diag["aevo_account"] = await self.exchange.aevo_client.get_account()
                 diag["aevo_portfolio"] = await self.exchange.aevo_client.get_account_state()
                 diag["aevo_positions"] = await self.exchange.aevo_client.get_positions()
+                diag["aevo_orders"] = await self.exchange.aevo_client.get_open_orders()
             if hasattr(self.exchange, "hl_client"):
                 diag["hl_account"] = await self.exchange.hl_client.get_account_state()
         except Exception as e:

@@ -388,6 +388,12 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         """Tanca a mercat TOTS els contractes oberts a Hyperliquid i Aevo per deixar els comptes 100% plans."""
         results = {"hl_closed": [], "aevo_closed": []}
         try:
+            # 0. Cancel·lar qualsevol ordre oberta a Aevo per alliberar marge
+            try:
+                await self.aevo_client.cancel_all_orders()
+            except Exception as ce:
+                logger.debug(f"Error cancel·lant ordres pendents Aevo: {ce}")
+
             # 1. Tancar Hyperliquid
             hl_state = await self.hl_client.get_account_state()
             if isinstance(hl_state, dict):

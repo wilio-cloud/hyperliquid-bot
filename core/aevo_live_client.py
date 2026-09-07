@@ -293,6 +293,34 @@ class AevoLiveClient:
             logger.error(f"Error cancel·lant ordre Aevo {order_id}: {e}")
             return {"status": "err", "error": str(e)}
 
+    async def get_open_orders(self) -> List[Dict[str, Any]]:
+        """Consulta les ordres obertes pendents a Aevo."""
+        url = f"{self.rest_url}/orders"
+        try:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self.ssl_context)) as session:
+                async with session.get(url, headers=self.headers, timeout=aiohttp.ClientTimeout(total=6.0)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if isinstance(data, list):
+                            return data
+                        elif isinstance(data, dict):
+                            return data.get("orders", [])
+                    return []
+        except Exception as e:
+            logger.error(f"Error consultant ordres Aevo: {e}")
+            return []
+
+    async def cancel_all_orders(self) -> Dict[str, Any]:
+        """Cancel·la TOTES les ordres pendents a Aevo."""
+        url = f"{self.rest_url}/orders-all"
+        try:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self.ssl_context)) as session:
+                async with session.delete(url, headers=self.headers, timeout=aiohttp.ClientTimeout(total=6.0)) as resp:
+                    return await resp.json()
+        except Exception as e:
+            logger.error(f"Error cancel·lant totes les ordres Aevo: {e}")
+            return {"error": str(e)}
+
     async def get_positions(self) -> List[Dict[str, Any]]:
         """Consulta les posicions obertes reals a Aevo."""
         url = f"{self.rest_url}/positions"
