@@ -18,17 +18,17 @@ logger = logging.getLogger("CrossArbitrage")
 class CrossExchangeArbitrageStrategy:
     def __init__(
         self,
-        min_entry_spread_pct: float = 0.170,   # Dislocació mínima d'entrada entre setmana (+0.170% per a benefici net ampli)
-        weekend_min_spread_pct: float = 0.150, # Llindar dinàmic per a caps de setmana (+0.150% garantint marge sobre comissions)
+        min_entry_spread_pct: float = 0.120,   # Dislocació mínima d'entrada entre setmana (+0.120% optimitzat per a comissions baixes d'Aevo)
+        weekend_min_spread_pct: float = 0.100, # Llindar dinàmic per a caps de setmana (+0.100% per maximitzar operacions)
         auto_weekend_adjust: bool = True,       # Ajust automàtic segons calendari UTC
         min_funding_harvest_apr: float = 12.0, # Llindar d'APR per obrir collita de funding passiu (+12.0% APR)
         target_exit_spread_pct: float = 0.010, # Convergència de sortida (<= +0.010%)
-        min_profit_usd: float = 0.20,          # Benefici net mínim garantit per trade tancat (+0.20$)
-        take_profit_usd: float = 0.60,         # Tancament automàtic per benefici substancial (+0.60$)
+        min_profit_usd: float = 0.10,          # Benefici net mínim garantit per trade tancat (+0.10$ net)
+        take_profit_usd: float = 0.40,         # Tancament automàtic per benefici substancial (+0.40$)
         max_divergence_pct: float = 2.50,      # Stop de divergència (+2.50% addicional per a deslligaments reals, no metxes de 1 cèntim)
         divergence_min_duration_sec: float = 60.0, # Requereix que la divergència sigui sostinguda almenys 60 segons
         max_hold_seconds: int = 43200,         # 12 hores màxim per posició (permet collir funding passiu)
-        max_book_spread_pct: float = 0.160,    # Llindar màxim d'spread intern (apte per a BTC/ETH/SOL a dYdX i HL, bloqueja il·líquids)
+        max_book_spread_pct: float = 0.250,    # Llindar màxim d'spread intern (adaptat a llibres d'altcoins d'Aevo)
     ):
         self.name = "CROSS_ARBITRAGE"
         self.min_entry_spread_pct = min_entry_spread_pct

@@ -48,15 +48,15 @@ class ArbitrageTradingBotApp:
     def __init__(
         self,
         coins: List[str],
-        venue2: str = "dydx",
-        min_spread: float = 0.170,
-        weekend_min_spread: float = 0.150,
-        min_profit_usd: float = 0.20,
+        venue2: str = "aevo",
+        min_spread: float = 0.120,
+        weekend_min_spread: float = 0.100,
+        min_profit_usd: float = 0.10,
         exit_spread: float = 0.010,
         size_usd: float = 300.0,
         headless: bool = False,
         max_positions: int = 3,
-        max_book_spread: float = 0.160,
+        max_book_spread: float = 0.250,
         initial_balance: float = 1000.0,
         leverage: float = 2.0,
         dynamic_size: bool = True,
@@ -519,12 +519,12 @@ class DirectionalScalperApp:
         await self.ws_client.stop()
 
 def main():
-    min_spread_default = float(os.environ.get("MIN_SPREAD", "0.170"))
-    weekend_min_spread_default = float(os.environ.get("WEEKEND_MIN_SPREAD", "0.150"))
-    min_profit_default = float(os.environ.get("MIN_PROFIT", "0.20"))
+    min_spread_default = float(os.environ.get("MIN_SPREAD", "0.120"))
+    weekend_min_spread_default = float(os.environ.get("WEEKEND_MIN_SPREAD", "0.100"))
+    min_profit_default = float(os.environ.get("MIN_PROFIT", "0.10"))
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
     max_positions_default = int(os.environ.get("MAX_POSITIONS", "3"))
-    max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.160"))
+    max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.250"))
     venue2_default = os.environ.get("VENUE2", "aevo").lower()
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
     leverage_default = float(os.environ.get("LEVERAGE", "2.0"))
@@ -546,12 +546,12 @@ def main():
     parser.add_argument("--size-pct", type=float, default=size_pct_default, help="Percentatge del capital total per a cada ordre (default: 30.0%%)")
     parser.add_argument("--min-size", type=float, default=min_size_default, help="Mida mínima d'ordre en dòlars (default: 100.0$)")
     parser.add_argument("--max-size", type=float, default=max_size_default, help="Límit màxim de mida per seguretat de llibre (default: 2500.0$)")
-    parser.add_argument("--min-spread", type=float, default=min_spread_default, help="Spread mínim percentual d'entrada entre setmana (default: 0.170%%)")
-    parser.add_argument("--weekend-min-spread", type=float, default=weekend_min_spread_default, help="Spread mínim percentual d'entrada en cap de setmana (default: 0.150%%)")
-    parser.add_argument("--min-profit", type=float, default=min_profit_default, help="Benefici net mínim permès per trade tancat (default: 0.20$)")
+    parser.add_argument("--min-spread", type=float, default=min_spread_default, help="Spread mínim percentual d'entrada entre setmana (default: 0.120%%)")
+    parser.add_argument("--weekend-min-spread", type=float, default=weekend_min_spread_default, help="Spread mínim percentual d'entrada en cap de setmana (default: 0.100%%)")
+    parser.add_argument("--min-profit", type=float, default=min_profit_default, help="Benefici net mínim permès per trade tancat (default: 0.10$)")
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
     parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 3)")
-    parser.add_argument("--max-book-spread", type=float, default=max_book_spread_default, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.160%%)")
+    parser.add_argument("--max-book-spread", type=float, default=max_book_spread_default, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.250%%)")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
     parser.add_argument("--no-burst", action="store_true", help="Desactivar Volume Burst (només scalper)")
