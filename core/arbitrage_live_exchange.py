@@ -41,34 +41,109 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         self._configured_leverage_coins: set = set()
 
     async def reconcile_active_positions(self):
-        """Si tant a Hyperliquid com a Aevo no hi ha cap posició oberta a nivell de compte, sincronitza l'estat intern."""
+        """Sincronitza l'estat intern amb les posicions reals obertes a Hyperliquid i Aevo."""
         try:
             hl_state_task = asyncio.create_task(self.hl_client.get_account_state())
             aevo_pos_task = asyncio.create_task(self.aevo_client.get_positions())
             hl_state, aevo_positions = await asyncio.gather(hl_state_task, aevo_pos_task, return_exceptions=True)
 
-            hl_open_coins = set()
+            hl_positions_map = {}
             if isinstance(hl_state, dict):
                 for p in hl_state.get("assetPositions", []):
-                    if float(p.get("position", {}).get("szi", 0.0)) != 0.0:
-                        c = p.get("position", {}).get("coin", "")
-                        if c:
-                            hl_open_coins.add(c.upper())
+                    pos = p.get("position", {})
+                    szi = float(pos.get("szi", 0.0))
+                    c = pos.get("coin", "").upper()
+                    if szi != 0.0 and c:
+                        hl_positions_map[c] = pos
 
-            aevo_open_coins = set()
+            aevo_positions_map = {}
             if isinstance(aevo_positions, list):
                 for p in aevo_positions:
-                    if float(p.get("amount", 0.0)) != 0.0:
-                        c = p.get("asset", "")
-                        if c:
-                            aevo_open_coins.add(c.upper())
+                    amt = float(p.get("amount", 0.0))
+                    c = p.get("asset", "").upper()
+                    if amt != 0.0 and c:
+                        aevo_positions_map[c] = p
 
-            self._open_broker_coins = hl_open_coins.union(aevo_open_coins)
+            self._open_broker_coins = set(hl_positions_map.keys()).union(set(aevo_positions_map.keys()))
 
-            if not hl_open_coins and not aevo_open_coins and self.active_positions:
-                logger.info("Reconciliació de posicions: ni Hyperliquid ni Aevo tenen posicions obertes. Netejant active_positions internes.")
+            # Si ni HL ni Aevo tenen cap posició oberta, netegem
+            if not self._open_broker_coins and self.active_positions:
+                logger.info("Reconciliació: cap posició oberta als brokers. Netejant active_positions internes.")
                 self.active_positions.clear()
                 self.save_state()
+                return
+
+            # Reconciliem cada moneda que tingui posicions obertes als brokers
+            existing_active_coins = {p.coin.upper(): pair_id for pair_id, p in self.active_positions.items()}
+
+            for coin in self._open_broker_coins:
+                if coin not in existing_active_coins:
+                    hl_pos = hl_positions_map.get(coin)
+                    aevo_pos = aevo_positions_map.get(coin)
+                    if hl_pos and aevo_pos:
+                        szi = float(hl_pos.get("szi", 0.0))
+                        hl_entry_px = float(hl_pos.get("entryPx", 0.0))
+                        aevo_amount = float(aevo_pos.get("amount", 0.0))
+                        aevo_side = aevo_pos.get("side", "").lower()
+                        aevo_entry_px = float(aevo_pos.get("avg_entry_price", 0.0))
+
+                        if szi < 0 and aevo_side == "buy":
+                            direction = ArbitrageDirection.SELL_HL_BUY_BN
+                            hl_side = OrderSide.SELL
+                            bn_side = OrderSide.BUY
+                        else:
+                            direction = ArbitrageDirection.BUY_HL_SELL_BN
+                            hl_side = OrderSide.BUY
+                            bn_side = OrderSide.SELL
+
+                        hl_sz = abs(szi)
+                        bn_sz = abs(aevo_amount)
+                        pair_id = f"arb_{coin}_reconciled_{int(time.time())}"
+
+                        mid = (hl_entry_px + aevo_entry_px) / 2.0 if (hl_entry_px + aevo_entry_px) > 0 else 1.0
+                        entry_spread = abs(hl_entry_px - aevo_entry_px) / mid * 100.0
+
+                        leg_hl = ArbitrageLeg(
+                            venue="HYPERLIQUID",
+                            coin=coin,
+                            side=hl_side,
+                            entry_price=hl_entry_px,
+                            size=hl_sz,
+                            size_usd=hl_sz * hl_entry_px,
+                            current_price=hl_entry_px,
+                            fee_rate=self.hl_taker_fee,
+                            fees_paid=hl_sz * hl_entry_px * self.hl_taker_fee,
+                        )
+                        leg_bn = ArbitrageLeg(
+                            venue=self.venue2_name,
+                            coin=coin,
+                            side=bn_side,
+                            entry_price=aevo_entry_px,
+                            size=bn_sz,
+                            size_usd=bn_sz * aevo_entry_px,
+                            current_price=aevo_entry_px,
+                            fee_rate=self.bn_taker_fee,
+                            fees_paid=bn_sz * aevo_entry_px * self.bn_taker_fee,
+                        )
+                        pos_obj = ArbitragePosition(
+                            pair_id=pair_id,
+                            coin=coin,
+                            direction=direction,
+                            leg_hl=leg_hl,
+                            leg_bn=leg_bn,
+                            entry_spread_pct=entry_spread,
+                            entry_time=time.time(),
+                        )
+                        self.active_positions[pair_id] = pos_obj
+                        logger.info(f"✅ Reconciliada posició activa existent per a {coin} a active_positions ({pair_id})")
+
+            # Si una posició local ja està tancada als brokers, l'eliminem
+            for coin, pair_id in list(existing_active_coins.items()):
+                if coin not in self._open_broker_coins:
+                    logger.info(f"Netejant posició {coin} d'active_positions perquè ja no existeix als brokers.")
+                    self.active_positions.pop(pair_id, None)
+
+            self.save_state()
         except Exception as e:
             logger.debug(f"Error en reconcile_active_positions: {e}")
 
