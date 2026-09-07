@@ -405,7 +405,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     closedBody.innerHTML = data.recent_closed.slice().reverse().map(p => {
                         const pnlVal = p.realized_pnl || 0.0;
                         const pnlColor = pnlVal >= 0 ? 'green' : 'red';
-                        const reasonColor = (p.exit_reason === 'CONVERGENCE_TARGET' || p.exit_reason === 'TAKE_PROFIT_TARGET') ? 'green' : 'yellow';
+                        const reasonColor = (p.exit_reason === 'CONVERGENCE_TARGET' || p.exit_reason === 'TAKE_PROFIT_TARGET' || p.exit_reason === 'TIME_BREAKEVEN' || p.exit_reason === 'TIME_QUICK_PROFIT') ? 'green' : (p.exit_reason && p.exit_reason.includes('STOP') ? 'red' : 'yellow');
                         return `<tr>
                             <td style="font-weight: bold; color: #facc15;">${p.coin}</td>
                             <td style="color: #38bdf8;">${p.direction}</td>

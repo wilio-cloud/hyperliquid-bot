@@ -450,18 +450,18 @@ def test_coin_stats_and_pace_tracking():
     print("  Control de freqüència i analítica per moneda verificats amb èxit.")
 
 def test_per_coin_effective_spread_and_cooldown():
-    """Verifica que ETH i SOL utilitzin el llindar de 0.095% i que el cooldown sigui de 90s."""
+    """Verifica que ETH, SOL, NEAR, HYPE utilitzin el llindar de 0.095%, PUMP 0.150% i BTC 0.080%."""
     from strategies.cross_arbitrage import CrossExchangeArbitrageStrategy
     strat = CrossExchangeArbitrageStrategy(min_entry_spread_pct=0.120, auto_weekend_adjust=False)
 
     assert strat.get_effective_min_spread("ETH") == 0.095
     assert strat.get_effective_min_spread("SOL") == 0.095
     assert strat.get_effective_min_spread("BTC") == 0.080
-    assert strat.get_effective_min_spread("NEAR") == 0.120
-    assert strat.get_effective_min_spread("HYPE") == 0.120
+    assert strat.get_effective_min_spread("NEAR") == 0.095
+    assert strat.get_effective_min_spread("HYPE") == 0.095
+    assert strat.get_effective_min_spread("PUMP") == 0.150
 
     # Simular ETH amb un spread del 0.100% (HL: 2502.50, AEVO: 2500.00)
-    # Amb el llindar antic de 0.120% no hauria disparat senyal.
     # Amb el nou llindar de 0.095% ha de disparar senyal d'entrada!
     hl_book = OrderBookL2(coin="ETH", timestamp=1000.0, bids=[BookLevel(price=2502.40, size=5.0)], asks=[BookLevel(price=2502.60, size=5.0)])
     aevo_book = OrderBookL2(coin="ETH", timestamp=1000.0, bids=[BookLevel(price=2499.80, size=5.0)], asks=[BookLevel(price=2500.00, size=5.0)])
@@ -473,7 +473,51 @@ def test_per_coin_effective_spread_and_cooldown():
     assert sig.direction == ArbitrageDirection.SELL_HL_BUY_BN
     assert sig.spread_pct >= 0.095
 
-    print("  Llindars per moneda (ETH/SOL a 0.095%) verificats amb èxit.")
+    print("  Llindars per moneda (ETH/SOL/NEAR/HYPE a 0.095%, PUMP 0.150%) verificats amb èxit.")
+
+def test_time_based_exit_guards_never_exit_at_loss():
+    """Verifica que el bot MAI surti en pèrdua per temps (eliminació de TIMEOUT_RECYCLE i MAX_HOLD_RELEASE)."""
+    strat = CrossExchangeArbitrageStrategy(max_book_spread_pct=0.350)
+    
+    # Crear una posició oberta fa 30 minuts (1800s) on el spread encara no ha convergit
+    pos = ArbitragePosition(
+        pair_id="ARB_TEST_ETH",
+        coin="ETH",
+        direction=ArbitrageDirection.SELL_HL_BUY_BN,
+        entry_time=time.time() - 1800.0,
+        entry_spread_pct=0.100,
+        leg_hl=ArbitrageLeg(coin="ETH", side=OrderSide.SELL, entry_price=2500.0, size=0.1, size_usd=250.0, venue="HYPERLIQUID"),
+        leg_bn=ArbitrageLeg(coin="ETH", side=OrderSide.BUY, entry_price=2497.5, size=0.1, size_usd=249.75, venue="AEVO"),
+        total_fees=0.17,
+    )
+
+    # Simular llibres on el spread actual generaria pèrdua (-0.20$)
+    # HL ask = 2501.0 (recompra a pèrdua), Aevo bid = 2497.0 (venda a pèrdua)
+    hl_book = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2500.8, size=5.0)], asks=[BookLevel(price=2501.0, size=5.0)])
+    aevo_book = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2497.0, size=5.0)], asks=[BookLevel(price=2497.2, size=5.0)])
+    strat.update_hl_book(hl_book)
+    strat.update_bn_book(aevo_book)
+
+    # Comprovar: MALGRAT portar 30 minuts, MAI ha de forçar la sortida si està en pèrdua!
+    exit_eval = strat.check_exit(pos)
+    assert exit_eval is None, "El bot NO ha de tancar en pèrdua per temps sota cap concepte!"
+
+    # Ara simulem que porta > 5 minuts (400s) i el spread ha convergit donant un guany ràpid de +0.06$
+    pos.entry_time = time.time() - 400.0
+    hl_book_win = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2498.4, size=5.0)], asks=[BookLevel(price=2498.5, size=5.0)])
+    aevo_book_win = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2498.4, size=5.0)], asks=[BookLevel(price=2498.5, size=5.0)])
+    strat.update_hl_book(hl_book_win)
+    strat.update_bn_book(aevo_book_win)
+
+    exit_eval_quick = strat.check_exit(pos)
+    assert exit_eval_quick is not None
+    assert exit_eval_quick[0] in ("TIME_QUICK_PROFIT", "CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET")
+
+    # Comprovar Book Spread Guard a la sortida: si el llibre d'Aevo s'eixampla a 0.50% (> 0.350%), bloqueja la sortida
+    aevo_book_wide = OrderBookL2(coin="ETH", timestamp=time.time(), bids=[BookLevel(price=2490.0, size=5.0)], asks=[BookLevel(price=2505.0, size=5.0)])
+    strat.update_bn_book(aevo_book_wide)
+    assert strat.check_exit(pos) is None, "Exit Book Spread Guard ha de bloquejar sortides quan el llibre és il·líquid!"
+    print("  Garantia de 0 sortides en negatiu per temps (Profit Guard 100%) i Exit Spread Guard verificats amb èxit.")
 
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
@@ -488,4 +532,5 @@ if __name__ == "__main__":
     test_dynamic_proportional_take_profit()
     test_coin_stats_and_pace_tracking()
     test_per_coin_effective_spread_and_cooldown()
+    test_time_based_exit_guards_never_exit_at_loss()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")

@@ -191,7 +191,7 @@ class ArbitrageTradingBotApp:
                 if exit_eval:
                     reason, hl_px, bn_px = exit_eval
                     # En tancaments ordenats (convergència, take profit o breakeven per temps), apliquem comissió passiva Maker (estalvi del 60% en sortida)
-                    is_maker_exit = reason in ("CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET", "TIME_BREAKEVEN")
+                    is_maker_exit = reason in ("CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET", "TIME_BREAKEVEN", "TIME_QUICK_PROFIT")
                     self.exchange.close_arbitrage_position(
                         pair_id=pos.pair_id,
                         hl_exit_price=hl_px,
@@ -638,7 +638,7 @@ def main():
         if args.venue2 == "dydx":
             default_coins = ["BTC", "ETH", "SOL"]
         elif args.venue2 == "aevo":
-            default_coins = ["BTC", "ETH", "SOL", "HYPE", "NEAR", "SUI", "XRP", "PUMP"]
+            default_coins = ["BTC", "ETH", "SOL", "HYPE", "NEAR", "XRP", "PUMP"]
         else:
             default_coins = ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
         coins = args.coins or default_coins

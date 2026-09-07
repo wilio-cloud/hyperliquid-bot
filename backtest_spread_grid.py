@@ -51,7 +51,7 @@ class ArbitrageGridBacktest:
         leverage: float = 2.0,
         max_positions: int = 4,
     ):
-        self.coins = coins or ["BTC", "ETH", "SOL", "HYPE", "NEAR", "SUI", "XRP", "PUMP"]
+        self.coins = coins or ["BTC", "ETH", "SOL", "HYPE", "NEAR", "XRP", "PUMP"]
         self.duration_sec = duration_sec
         self.initial_balance = initial_balance
         self.order_size_usd = order_size_usd
@@ -203,7 +203,7 @@ class ArbitrageGridBacktest:
                     exit_res = strat.check_exit(pos)
                     if exit_res:
                         reason, hl_px, bn_px = exit_res
-                        is_maker = reason in ("CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET", "TIME_BREAKEVEN")
+                        is_maker = reason in ("CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET", "TIME_BREAKEVEN", "TIME_QUICK_PROFIT")
                         exchange.close_arbitrage_position(pos.pair_id, hl_px, bn_px, reason, is_maker=is_maker)
                         cooldowns[coin] = ev.timestamp + 45.0
 

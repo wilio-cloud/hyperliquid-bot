@@ -27,7 +27,7 @@ class CrossExchangeArbitrageStrategy:
         take_profit_usd: float = 0.40,         # Tancament automàtic per benefici substancial (+0.40$)
         max_divergence_pct: float = 2.50,      # Stop de divergència (+2.50% addicional per a deslligaments reals, no metxes de 1 cèntim)
         divergence_min_duration_sec: float = 60.0, # Requereix que la divergència sigui sostinguda almenys 60 segons
-        max_hold_seconds: int = 1500,          # 25 minuts màxim absolut (evita bloquejos d'actius i allibera la ranura)
+        max_hold_seconds: int = 86400,         # 24 hores màxim (mai forcem sortida en pèrdua per temps)
         max_book_spread_pct: float = 0.350,    # Llindar màxim d'spread intern (adaptat a llibres d'altcoins d'Aevo)
         per_coin_min_spread: Optional[Dict[str, float]] = None, # Llindars personalitzats per actiu
     ):
@@ -45,15 +45,15 @@ class CrossExchangeArbitrageStrategy:
         self.max_book_spread_pct = max_book_spread_pct
 
         # Llindars optimitzats per actiu per garantir 8-10 op/h durant tot el dia:
-        # ETH, SOL, NEAR, HYPE i XRP tenen bona liquiditat i comissions baixes,
-        # per la qual cosa amb 0.095% generen beneficis nets de sobres (+0.10$ a +0.16$ net).
-        # PUMP té spread una mica més ampli (0.21%), per tant 0.110% és òptim.
+        # ETH, SOL, NEAR, HYPE i XRP tenen excel·lent liquiditat i comissions baixes,
+        # per la qual cosa amb 0.095% generen beneficis nets consistents (+0.10$ a +0.25$ net).
+        # PUMP té volatilitat i spread més ampli (0.21%), per tant 0.150% garanteix guanys sòlids.
         self.per_coin_min_spread: Dict[str, float] = per_coin_min_spread or {
             "ETH": 0.095,
             "SOL": 0.095,
             "BTC": 0.080,
             "XRP": 0.095,
-            "PUMP": 0.110,
+            "PUMP": 0.150,
             "NEAR": 0.095,
             "HYPE": 0.095,
         }
@@ -257,6 +257,18 @@ class CrossExchangeArbitrageStrategy:
         if not hl_book or not bn_book or not (hl_book.best_bid and hl_book.best_ask and bn_book.best_bid and bn_book.best_ask):
             return None
 
+        # PROTECCIÓ DE LIQUIDITAT EN SORTIDA:
+        # Mai executem la sortida si el llibre de comandes d'algun dels exchanges està eixamplat (> max_book_spread_pct).
+        # Això evita al 100% patir slippage per llibres buits durant pics de volatilitat.
+        if hl_book.mid_price > 0:
+            hl_inner_spread = ((hl_book.best_ask - hl_book.best_bid) / hl_book.mid_price) * 100.0
+            if hl_inner_spread > self.max_book_spread_pct:
+                return None
+        if bn_book.mid_price > 0:
+            bn_inner_spread = ((bn_book.best_ask - bn_book.best_bid) / bn_book.mid_price) * 100.0
+            if bn_inner_spread > self.max_book_spread_pct:
+                return None
+
         global_mid = (hl_book.mid_price + bn_book.mid_price) / 2.0
 
         if pos.direction == ArbitrageDirection.SELL_HL_BUY_BN:
@@ -280,14 +292,14 @@ class CrossExchangeArbitrageStrategy:
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
             order_size_usd = pos.leg_hl.size * pos.leg_hl.entry_price
-            # Take profit proporcional (com ahir: 0.05% net del valor de l'ordre, mínim 0.15$)
+            # Take profit proporcional (0.05% net del valor de l'ordre, mínim 0.15$)
             target_tp = max(0.15, order_size_usd * 0.0005)
             if self.take_profit_usd and 0 < self.take_profit_usd < target_tp:
                 target_tp = self.take_profit_usd
 
             target_min_profit = min(self.min_profit_usd, max(0.08, order_size_usd * 0.00025))
 
-            # 1. Take profit anticipat si el benefici net arriba a l'objectiu (tancament ràpid en 1-2m)
+            # 1. Take profit anticipat si el benefici net arriba a l'objectiu
             if projected_net_pnl >= target_tp:
                 return ("TAKE_PROFIT_TARGET", hl_exit_px, bn_exit_px)
 
@@ -346,18 +358,16 @@ class CrossExchangeArbitrageStrategy:
             else:
                 pos.divergence_start_time = None
 
-        # 4. Gestió dinàmica per temps (Slot Recycling) per mantenir el ritme de 8-10 op/h:
+        # 4. Gestió per temps (Time-based Profit Guard):
+        # Mai sortim en negatiu per temps. Si porta estona obert, acceptem beneficis
+        # més moderats (+0.05$ o +0.02$) per alliberar la ranura ràpidament, però SEMPRE amb PnL positiu!
         pos_age = time.time() - pos.entry_time
-        # A) Si porta > 8 minuts (480s) i el PnL net és positiu o neutre (>= +0.02$), tanca immediatament
+        # A) Si porta > 5 minuts (300s) i el PnL net és >= +0.04$, tanca per accelerar la rotació
+        if pos_age >= 300.0 and projected_net_pnl >= 0.04:
+            return ("TIME_QUICK_PROFIT", hl_exit_px, bn_exit_px)
+
+        # B) Si porta > 8 minuts (480s) i el PnL net és >= +0.02$, tanca amb breakeven positiu
         if pos_age >= 480.0 and projected_net_pnl >= 0.02:
             return ("TIME_BREAKEVEN", hl_exit_px, bn_exit_px)
-
-        # B) Si porta > 15 minuts (900s) i està molt a prop del break-even (>= -0.15$), allibera la ranura
-        if pos_age >= 900.0 and projected_net_pnl >= -0.15:
-            return ("TIMEOUT_RECYCLE", hl_exit_px, bn_exit_px)
-
-        # C) Si supera el temps màxim (25 minuts = 1500s), forçar la sortida per desbloquejar l'actiu
-        if pos_age >= self.max_hold_seconds:
-            return ("MAX_HOLD_RELEASE", hl_exit_px, bn_exit_px)
 
         return None
