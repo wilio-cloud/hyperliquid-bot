@@ -330,7 +330,7 @@ class ArbitrageTradingBotApp:
                 "total_fees": p.total_fees,
                 "realized_pnl": p.realized_pnl,
             }
-            for p in self.exchange.closed_positions[-15:]
+            for p in self.exchange.closed_positions[-35:]
         ]
         metrics = self.exchange.metrics.copy()
         current_size = self.calculate_order_size()
@@ -348,12 +348,22 @@ class ArbitrageTradingBotApp:
         metrics["max_book_spread"] = self.strategy.max_book_spread_pct
 
         # Càlcul del ritme horari global i mètriques detallades per actiu (Coin Analytics)
-        if self.exchange.closed_positions:
-            first_trade_t = min(p.entry_time for p in self.exchange.closed_positions if p.entry_time > 0)
-            elapsed_hours = max((time.time() - min(self.start_time, first_trade_t)) / 3600.0, 0.25)
-        else:
-            elapsed_hours = max((time.time() - self.start_time) / 3600.0, 1.0 / 3600.0)
+        now = time.time()
+        uptime_sec = max(now - self.start_time, 60.0)
 
+        # Obtenim els trades recents d'aquesta sessió (darreres 24 hores i època actual)
+        valid_trades = [
+            p for p in self.exchange.closed_positions
+            if p.entry_time and (now - p.entry_time) <= 86400 and p.entry_time > 1780000000
+        ]
+        if valid_trades:
+            first_trade_t = min(p.entry_time for p in valid_trades)
+            elapsed_sec = max(uptime_sec, now - first_trade_t)
+        else:
+            elapsed_sec = uptime_sec
+
+        # Mínim de 15 minuts (0.25h) per evitar divisions anòmales a l'inici
+        elapsed_hours = max(elapsed_sec / 3600.0, 0.25)
         total_closed = len(self.exchange.closed_positions)
         trades_per_hour = round(total_closed / elapsed_hours, 1)
         metrics["trades_per_hour"] = trades_per_hour
@@ -448,7 +458,11 @@ class ArbitrageTradingBotApp:
             c_avg_pnl = (c_pnl / c_count) if c_count > 0 else 0.0
             c_pace = round(c_count / elapsed_hours, 1)
 
-            durations = [max(0.0, (p.exit_time - p.entry_time)) for p in coin_trades if p.exit_time]
+            durations = [
+                max(0.0, (p.exit_time - p.entry_time))
+                for p in coin_trades
+                if p.exit_time and p.entry_time and (0 < (p.exit_time - p.entry_time) < 86400)
+            ]
             avg_dur_sec = (sum(durations) / len(durations)) if durations else 0.0
             avg_dur_min = round(avg_dur_sec / 60.0, 1)
 

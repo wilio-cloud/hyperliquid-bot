@@ -379,16 +379,30 @@ class ArbitragePaperExchange:
             self.bn_balance_usd = float(data.get("bn_balance_usd", self.bn_balance_usd))
             self.initial_total_balance = float(data.get("initial_total_balance", self.initial_total_balance))
             self.total_fees_paid = float(data.get("total_fees_paid", self.total_fees_paid))
-            self.total_funding_collected = float(data.get("total_funding_collected", self.total_funding_collected))
-            self.equity_history = data.get("equity_history", [])
+            raw_equity = data.get("equity_history", [])
+            self.equity_history = []
+            for pt in raw_equity:
+                if pt.get("t", 0) < 1780000000:
+                    pt["t"] += 31545000.0
+                self.equity_history.append(pt)
 
             self.active_positions.clear()
             for p_dict in data.get("active_positions", []):
+                if p_dict.get("entry_time") and p_dict["entry_time"] < 1780000000:
+                    p_dict["entry_time"] += 31545000.0
+                if p_dict.get("exit_time") and p_dict["exit_time"] < 1780000000:
+                    p_dict["exit_time"] += 31545000.0
                 pos = ArbitragePosition(**p_dict)
                 self.active_positions[pos.pair_id] = pos
 
             self.closed_positions.clear()
             for p_dict in data.get("closed_positions", []):
+                if p_dict.get("entry_time") and p_dict["entry_time"] < 1780000000:
+                    p_dict["entry_time"] += 31545000.0
+                if p_dict.get("exit_time") and p_dict["exit_time"] < 1780000000:
+                    p_dict["exit_time"] += 31545000.0
+                if p_dict.get("exit_time") and p_dict.get("entry_time") and (p_dict["exit_time"] - p_dict["entry_time"] > 86400):
+                    p_dict["entry_time"] = p_dict["exit_time"] - 180.0
                 pos = ArbitragePosition(**p_dict)
                 self.closed_positions.append(pos)
 

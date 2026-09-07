@@ -950,7 +950,7 @@ class WebDashboardServer:
                         "total_fees": p.total_fees,
                         "realized_pnl": p.realized_pnl,
                     }
-                    for p in self.exchange.closed_positions[-15:]
+                    for p in self.exchange.closed_positions[-35:]
                 ]
 
         return web.json_response({
