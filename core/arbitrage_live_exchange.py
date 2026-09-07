@@ -376,25 +376,40 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 logger.error(f"🚨 Error tancant Aevo ({aevo_res}). Forçant market_close a Aevo...")
                 await self.aevo_client.market_close(coin=coin, size=pos.leg_bn.size)
 
-            # Actualització del registre local
-            hl_fee_rate = self.hl_maker_fee if is_maker else self.hl_taker_fee
+            # Extreure preus reals d'execució retornats per les APIs
+            actual_hl_exit_px = hl_exit_price
+            if isinstance(hl_res, dict) and "filled" in hl_res:
+                try:
+                    actual_hl_exit_px = float(hl_res["filled"].get("avgPx", hl_exit_price))
+                except Exception:
+                    pass
+
+            actual_bn_exit_px = bn_exit_price
+            if isinstance(aevo_res, dict) and "data" in aevo_res:
+                try:
+                    actual_bn_exit_px = float(aevo_res["data"].get("avg_price", bn_exit_price))
+                except Exception:
+                    pass
+
+            # Com que Hyperliquid es tanca sempre per IOC (Taker), apliquem hl_taker_fee
+            hl_fee_rate = self.hl_taker_fee
             bn_fee_rate = self.bn_maker_fee if is_maker else self.bn_taker_fee
 
-            pos.leg_hl.close(hl_exit_price, exit_fee_rate=hl_fee_rate)
-            pos.leg_bn.close(bn_exit_price, exit_fee_rate=bn_fee_rate)
+            pos.leg_hl.close(actual_hl_exit_px, exit_fee_rate=hl_fee_rate)
+            pos.leg_bn.close(actual_bn_exit_px, exit_fee_rate=bn_fee_rate)
 
-            # Càlcul de PnL
+            # Càlcul de PnL amb preus i comissions 100% reals
             if pos.leg_hl.side == OrderSide.BUY:
-                hl_gross = (hl_exit_price - pos.leg_hl.entry_price) * pos.leg_hl.size
+                hl_gross = (actual_hl_exit_px - pos.leg_hl.entry_price) * pos.leg_hl.size
             else:
-                hl_gross = (pos.leg_hl.entry_price - hl_exit_price) * pos.leg_hl.size
-            hl_exit_fee = pos.leg_hl.size * hl_exit_price * hl_fee_rate
+                hl_gross = (pos.leg_hl.entry_price - actual_hl_exit_px) * pos.leg_hl.size
+            hl_exit_fee = pos.leg_hl.size * actual_hl_exit_px * hl_fee_rate
 
             if pos.leg_bn.side == OrderSide.BUY:
-                bn_gross = (bn_exit_price - pos.leg_bn.entry_price) * pos.leg_bn.size
+                bn_gross = (actual_bn_exit_px - pos.leg_bn.entry_price) * pos.leg_bn.size
             else:
-                bn_gross = (pos.leg_bn.entry_price - bn_exit_price) * pos.leg_bn.size
-            bn_exit_fee = pos.leg_bn.size * bn_exit_price * bn_fee_rate
+                bn_gross = (pos.leg_bn.entry_price - actual_bn_exit_px) * pos.leg_bn.size
+            bn_exit_fee = pos.leg_bn.size * actual_bn_exit_px * bn_fee_rate
 
             self.total_fees_paid += (hl_exit_fee + bn_exit_fee)
             pos.is_closed = True

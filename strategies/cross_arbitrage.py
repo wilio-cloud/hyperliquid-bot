@@ -288,7 +288,7 @@ class CrossExchangeArbitrageStrategy:
             
             venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
             venue2_maker_rate = 0.00000 if "AEVO" in venue2_name else 0.00020
-            hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00010  # Maker exit 0.010%
+            hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00035  # Taker IOC exit 0.035%
             bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_maker_rate
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
@@ -333,7 +333,7 @@ class CrossExchangeArbitrageStrategy:
             
             venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
             venue2_maker_rate = 0.00000 if "AEVO" in venue2_name else 0.00020
-            hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00010
+            hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00035  # Taker IOC exit 0.035%
             bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_maker_rate
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
