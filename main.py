@@ -53,14 +53,14 @@ class ArbitrageTradingBotApp:
         self,
         coins: List[str],
         venue2: str = "aevo",
-        min_spread: float = 0.120,
-        weekend_min_spread: float = 0.100,
-        min_profit_usd: float = 0.10,
+        min_spread: float = 0.280,
+        weekend_min_spread: float = 0.240,
+        min_profit_usd: float = 0.25,
         exit_spread: float = 0.010,
         size_usd: float = 250.0,
         headless: bool = False,
         max_positions: int = 4,
-        max_book_spread: float = 0.350,
+        max_book_spread: float = 0.220,
         initial_balance: float = 1000.0,
         leverage: float = 2.0,
         dynamic_size: bool = True,
@@ -401,7 +401,7 @@ class ArbitrageTradingBotApp:
         metrics["min_spread"] = eff_spread
         metrics["weekday_min_spread"] = self.strategy.min_entry_spread_pct
         metrics["weekend_min_spread"] = self.strategy.weekend_min_spread_pct
-        metrics["regime_label"] = f"🗓️ CAP DE SETMANA ({eff_spread:.3f}%)" if is_wk else f"⚡ SETMANAL ({eff_spread:.3f}%)"
+        metrics["regime_label"] = f"🗓️ CAP DE SETMANA ({eff_spread:.3f}%)" if is_wk else f"💎 RENDIBILITAT REAL ({eff_spread:.3f}%)"
         metrics["max_book_spread"] = self.strategy.max_book_spread_pct
 
         # Càlcul del ritme horari global i mètriques detallades per actiu (Coin Analytics)
@@ -774,12 +774,12 @@ class DirectionalScalperApp:
         await self.ws_client.stop()
 
 def main():
-    min_spread_default = float(os.environ.get("MIN_SPREAD", "0.120"))
-    weekend_min_spread_default = float(os.environ.get("WEEKEND_MIN_SPREAD", "0.100"))
-    min_profit_default = float(os.environ.get("MIN_PROFIT", "0.10"))
+    min_spread_default = float(os.environ.get("MIN_SPREAD", "0.280"))
+    weekend_min_spread_default = float(os.environ.get("WEEKEND_MIN_SPREAD", "0.240"))
+    min_profit_default = float(os.environ.get("MIN_PROFIT", "0.25"))
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
     max_positions_default = int(os.environ.get("MAX_POSITIONS", "4"))
-    max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.350"))
+    max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.220"))
     venue2_default = os.environ.get("VENUE2", "aevo").lower()
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
     leverage_default = float(os.environ.get("LEVERAGE", "2.0"))

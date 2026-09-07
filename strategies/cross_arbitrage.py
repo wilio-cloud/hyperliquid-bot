@@ -18,17 +18,17 @@ logger = logging.getLogger("CrossArbitrage")
 class CrossExchangeArbitrageStrategy:
     def __init__(
         self,
-        min_entry_spread_pct: float = 0.120,   # Dislocació mínima d'entrada entre setmana (+0.120% optimitzat per a comissions baixes d'Aevo)
-        weekend_min_spread_pct: float = 0.100, # Llindar dinàmic per a caps de setmana (+0.100% per maximitzar operacions)
+        min_entry_spread_pct: float = 0.280,   # Dislocació mínima d'entrada entre setmana (+0.280% per superar totes les comissions reals)
+        weekend_min_spread_pct: float = 0.240, # Llindar dinàmic per a caps de setmana (+0.240%)
         auto_weekend_adjust: bool = True,       # Ajust automàtic segons calendari UTC
-        min_funding_harvest_apr: float = 12.0, # Llindar d'APR per obrir collita de funding passiu (+12.0% APR)
+        min_funding_harvest_apr: float = 14.0, # Llindar d'APR per obrir collita de funding passiu (+14.0% APR)
         target_exit_spread_pct: float = 0.010, # Convergència de sortida (<= +0.010%)
-        min_profit_usd: float = 0.10,          # Benefici net mínim garantit per trade tancat (+0.10$ net)
-        take_profit_usd: float = 0.40,         # Tancament automàtic per benefici substancial (+0.40$)
+        min_profit_usd: float = 0.25,          # Benefici net mínim garantit per trade tancat (+0.25$ net després de comissions)
+        take_profit_usd: float = 0.45,         # Tancament automàtic per benefici substancial (+0.45$ net)
         max_divergence_pct: float = 2.50,      # Stop de divergència (+2.50% addicional per a deslligaments reals, no metxes de 1 cèntim)
         divergence_min_duration_sec: float = 60.0, # Requereix que la divergència sigui sostinguda almenys 60 segons
         max_hold_seconds: int = 86400,         # 24 hores màxim (mai forcem sortida en pèrdua per temps)
-        max_book_spread_pct: float = 0.350,    # Llindar màxim d'spread intern (adaptat a llibres d'altcoins d'Aevo)
+        max_book_spread_pct: float = 0.220,    # Llindar màxim d'spread intern (filtre de llibres buits o il·líquids)
         per_coin_min_spread: Optional[Dict[str, float]] = None, # Llindars personalitzats per actiu
     ):
         self.name = "CROSS_ARBITRAGE"
@@ -44,20 +44,19 @@ class CrossExchangeArbitrageStrategy:
         self.max_hold_seconds = max_hold_seconds
         self.max_book_spread_pct = max_book_spread_pct
 
-        # Llindars optimitzats per actiu per garantir 8-10 op/h durant tot el dia:
-        # ETH, SOL, NEAR, HYPE i XRP tenen excel·lent liquiditat i comissions baixes,
-        # per la qual cosa amb 0.095% generen beneficis nets consistents (+0.10$ a +0.25$ net).
-        # PUMP té volatilitat i spread més ampli (0.21%), per tant 0.150% garanteix guanys sòlids.
+        # Llindars optimitzats per actiu amb diners reals:
+        # Asseguren que el diferencial d'entrada superi àmpliament la comissió de Taker IOC (0.17% round-trip)
+        # i el diferencial de llibre d'Aevo, garantint guanys nets positius.
         self.per_coin_min_spread: Dict[str, float] = per_coin_min_spread or {
-            "ETH": 0.095,
-            "SOL": 0.095,
-            "BTC": 0.080,
-            "XRP": 0.095,
-            "PUMP": 0.150,
-            "NEAR": 0.095,
-            "HYPE": 0.095,
-            "SUI": 0.095,
-            "DOGE": 0.095,
+            "ETH": 0.240,
+            "SOL": 0.240,
+            "BTC": 0.200,
+            "XRP": 0.240,
+            "PUMP": 0.350,
+            "NEAR": 0.250,
+            "HYPE": 0.250,
+            "SUI": 0.250,
+            "DOGE": 0.300,
         }
 
         self.hl_books: Dict[str, OrderBookL2] = {}
@@ -287,25 +286,25 @@ class CrossExchangeArbitrageStrategy:
             bn_gross = (bn_exit_px - pos.leg_bn.entry_price) * pos.leg_bn.size
             
             venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
-            venue2_maker_rate = 0.00000 if "AEVO" in venue2_name else 0.00020
+            venue2_fee_rate = 0.00050 if "AEVO" in venue2_name else 0.00040  # Taker real Aevo 0.050%
             hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00035  # Taker IOC exit 0.035%
-            bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_maker_rate
+            bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_fee_rate
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
             order_size_usd = pos.leg_hl.size * pos.leg_hl.entry_price
-            # Take profit proporcional (0.05% net del valor de l'ordre, mínim 0.15$)
-            target_tp = max(0.15, order_size_usd * 0.0005)
+            # Take profit proporcional (mínim 0.40$ o 0.15% net del valor de l'ordre)
+            target_tp = max(0.40, order_size_usd * 0.0015)
             if self.take_profit_usd and 0 < self.take_profit_usd < target_tp:
                 target_tp = self.take_profit_usd
 
-            target_min_profit = min(self.min_profit_usd, max(0.08, order_size_usd * 0.00025))
+            target_min_profit = min(self.min_profit_usd, max(0.20, order_size_usd * 0.0008))
 
-            # 1. Take profit anticipat si el benefici net arriba a l'objectiu
+            # 1. Take profit anticipat si el benefici net real arriba a l'objectiu
             if projected_net_pnl >= target_tp:
                 return ("TAKE_PROFIT_TARGET", hl_exit_px, bn_exit_px)
 
-            # 2. Convergència reeixida NOMÉS si el benefici net és positiu
+            # 2. Convergència reeixida NOMÉS si el benefici net supera el mínim garantit
             if current_spread_to_close <= self.target_exit_spread_pct:
                 if projected_net_pnl >= target_min_profit:
                     return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
@@ -332,18 +331,18 @@ class CrossExchangeArbitrageStrategy:
             bn_gross = (pos.leg_bn.entry_price - bn_exit_px) * pos.leg_bn.size
             
             venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
-            venue2_maker_rate = 0.00000 if "AEVO" in venue2_name else 0.00020
+            venue2_fee_rate = 0.00050 if "AEVO" in venue2_name else 0.00040
             hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00035  # Taker IOC exit 0.035%
-            bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_maker_rate
+            bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_fee_rate
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
             order_size_usd = pos.leg_hl.size * pos.leg_hl.entry_price
-            target_tp = max(0.15, order_size_usd * 0.0005)
+            target_tp = max(0.40, order_size_usd * 0.0015)
             if self.take_profit_usd and 0 < self.take_profit_usd < target_tp:
                 target_tp = self.take_profit_usd
 
-            target_min_profit = min(self.min_profit_usd, max(0.08, order_size_usd * 0.00025))
+            target_min_profit = min(self.min_profit_usd, max(0.20, order_size_usd * 0.0008))
 
             if projected_net_pnl >= target_tp:
                 return ("TAKE_PROFIT_TARGET", hl_exit_px, bn_exit_px)
@@ -361,15 +360,15 @@ class CrossExchangeArbitrageStrategy:
                 pos.divergence_start_time = None
 
         # 4. Gestió per temps (Time-based Profit Guard):
-        # Mai sortim en negatiu per temps. Si porta estona obert, acceptem beneficis
-        # més moderats (+0.05$ o +0.02$) per alliberar la ranura ràpidament, però SEMPRE amb PnL positiu!
+        # Mai sortim en negatiu per temps. Com que som 100% delta-neutral, esperem la convergència.
+        # Només permetem sortida si el PnL net és sòlidament positiu després de totes les comissions:
         pos_age = time.time() - pos.entry_time
-        # A) Si porta > 5 minuts (300s) i el PnL net és >= +0.04$, tanca per accelerar la rotació
-        if pos_age >= 300.0 and projected_net_pnl >= 0.04:
+        # A) Si porta > 15 minuts (900s) i el PnL net és >= +0.20$, tanca per alliberar la ranura amb guany
+        if pos_age >= 900.0 and projected_net_pnl >= 0.20:
             return ("TIME_QUICK_PROFIT", hl_exit_px, bn_exit_px)
 
-        # B) Si porta > 8 minuts (480s) i el PnL net és >= +0.02$, tanca amb breakeven positiu
-        if pos_age >= 480.0 and projected_net_pnl >= 0.02:
+        # B) Si porta > 30 minuts (1800s) i el PnL net és >= +0.15$, tanca amb guany net garantit
+        if pos_age >= 1800.0 and projected_net_pnl >= 0.15:
             return ("TIME_BREAKEVEN", hl_exit_px, bn_exit_px)
 
         return None

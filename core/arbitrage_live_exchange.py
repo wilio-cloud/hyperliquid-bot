@@ -8,7 +8,7 @@ from core.arbitrage_models import ArbitrageDirection, ArbitrageLeg, ArbitragePos
 from core.arbitrage_paper_exchange import ArbitragePaperExchange
 from core.hyperliquid_live_client import HyperliquidLiveClient
 from core.aevo_live_client import AevoLiveClient
-from core.models import OrderSide
+from core.models import OrderBookL2, OrderSide
 
 logger = logging.getLogger("ArbitrageLiveExchange")
 
@@ -29,6 +29,10 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             initial_bn_balance=initial_bn_balance,
             venue2_name="AEVO",
             leverage=leverage,
+            hl_maker_fee=0.00010,
+            hl_taker_fee=0.00035,
+            bn_maker_fee=0.00000,
+            bn_taker_fee=0.00050,
             on_open_cb=on_open_cb,
             on_close_cb=on_close_cb,
             state_file=state_file,
@@ -39,6 +43,16 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         self._pending_closes: set = set()
         self._open_broker_coins: set = set()
         self._configured_leverage_coins: set = set()
+        self._last_hl_books: Dict[str, OrderBookL2] = {}
+        self._last_bn_books: Dict[str, OrderBookL2] = {}
+
+    def on_hl_book(self, book: OrderBookL2):
+        self._last_hl_books[book.coin] = book
+        super().on_hl_book(book)
+
+    def on_bn_book(self, book: OrderBookL2):
+        self._last_bn_books[book.coin] = book
+        super().on_bn_book(book)
 
     async def reconcile_active_positions(self):
         """Sincronitza l'estat intern amb les posicions reals obertes a Hyperliquid i Aevo."""
@@ -264,6 +278,25 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 f"HL: {'BUY' if hl_is_buy else 'SELL'} {hl_sz} @ {signal.hl_price} | "
                 f"Aevo: {'BUY' if aevo_is_buy else 'SELL'} {aevo_sz} @ {signal.bn_price}"
             )
+
+            # Pre-flight check: assegurar que el spread d'execució actual del llibre encara supera el llindar mínim
+            hl_book = self._last_hl_books.get(coin)
+            bn_book = self._last_bn_books.get(coin)
+            if hl_book and bn_book and hl_book.best_bid and hl_book.best_ask and bn_book.best_bid and bn_book.best_ask:
+                mid = (hl_book.mid_price + bn_book.mid_price) / 2.0
+                if mid > 0:
+                    if signal.direction == ArbitrageDirection.SELL_HL_BUY_BN:
+                        curr_exec_spread = ((hl_book.best_bid - bn_book.best_ask) / mid) * 100.0
+                    else:
+                        curr_exec_spread = ((bn_book.best_bid - hl_book.best_ask) / mid) * 100.0
+                    
+                    min_allowed = 0.200  # Hurdle rate mínim absolut abans d'enviar ordres a la blockchain
+                    if curr_exec_spread < min_allowed:
+                        logger.warning(
+                            f"⚠️ [PRE-FLIGHT REBUTJAT] Spread per a {coin} s'ha reduït a {curr_exec_spread:.3f}% "
+                            f"(mínim requerit {min_allowed:.3f}%). Avortant entrada per protegir capital."
+                        )
+                        return
 
             # 2. PAS A: Enviament de la pota primària (Hyperliquid Taker IOC)
             logger.info(f"Enviant pota primària a Hyperliquid per a {coin}...")
