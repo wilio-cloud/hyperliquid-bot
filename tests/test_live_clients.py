@@ -23,6 +23,7 @@ def test_hyperliquid_live_client_rounding_and_types():
         assert client.round_size("SOL", 1.23456) == 1.23
         assert client.round_size("SUI", 89.123) == 89.1
         assert client.round_size("HYPE", 3.456) == 3.46
+        assert client.round_size("ZEC", 1.2345) == 1.23
 
 def test_aevo_live_client_eip712_signing_and_instruments():
     client = AevoLiveClient(
@@ -36,6 +37,7 @@ def test_aevo_live_client_eip712_signing_and_instruments():
     assert client.get_instrument_id("SOL") == 5197
     assert client.get_instrument_id("HYPE") == 49760
     assert client.get_instrument_id("PUMP") == 82182
+    assert client.get_instrument_id("ZEC") == 100010
 
     # Verificació de generació de signatura EIP-712
     payload = client.sign_order_payload(

@@ -24,6 +24,7 @@ COIN_SZ_DECIMALS = {
     "OP": 1,
     "TIA": 1,
     "INJ": 1,
+    "ZEC": 2,
 }
 
 class HyperliquidLiveClient:

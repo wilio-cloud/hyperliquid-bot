@@ -195,7 +195,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         """Configura el palanquejament desitjat (ex: 2x) i Cross Margin a Hyperliquid i Aevo per a tots els mercats."""
         lev = int(leverage or self.leverage or 2)
         results = {"status": "ok", "leverage": lev, "hl": {}, "aevo": {}}
-        coins = ["SOL", "HYPE", "NEAR", "PUMP", "SUI", "DOGE", "AVAX", "LINK", "ARB", "OP", "TIA", "INJ"]
+        coins = ["SOL", "HYPE", "NEAR", "PUMP", "SUI", "ZEC"]
         logger.info(f"⚡ [LEVERAGE] Aplicant {lev}x Cross Margin a Hyperliquid i Aevo per a {coins}...")
 
         async def _configure_coin(c):

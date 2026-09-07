@@ -27,6 +27,7 @@ AEVO_INSTRUMENTS = {
     "OP": {"id": 7348, "amount_decimals": 1, "price_decimals": 4},
     "TIA": {"id": 8588, "amount_decimals": 0, "price_decimals": 4},
     "INJ": {"id": 10009, "amount_decimals": 1, "price_decimals": 3},
+    "ZEC": {"id": 100010, "amount_decimals": 3, "price_decimals": 2},
 }
 
 AEVO_DOMAINS = {

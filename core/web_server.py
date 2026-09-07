@@ -124,7 +124,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         📈 Trajectòria d'Equitat en Viu i Simulador de Creixement
                     </h2>
                     <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 3px;">
-                        Model compost a 25% de capital per ordre • Llindars reals ≥0.28% • Marge net: +0.22$ a +0.45$/trade (12 parells)
+                        Model compost a 25% de capital per ordre • Llindars reals ≥0.28% • Marge net: +0.22$ a +0.45$/trade (6 parells elit)
                     </div>
                 </div>
                 <div id="ny-session-badge" class="ny-badge ny-pre">
