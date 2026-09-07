@@ -119,6 +119,21 @@ class HyperliquidLiveClient:
         try:
             res = await asyncio.to_thread(_execute)
             logger.info(f"Ordre Hyperliquid enviada {coin} {'BUY' if is_buy else 'SELL'} {rounded_sz} @ {price}: {res}")
+            
+            # Verificació estricta de la resposta del motor d'Hyperliquid
+            if isinstance(res, dict):
+                if res.get("status") == "ok":
+                    resp_data = res.get("response", {})
+                    if isinstance(resp_data, dict) and resp_data.get("type") == "order":
+                        statuses = resp_data.get("data", {}).get("statuses", [])
+                        if statuses and isinstance(statuses[0], dict):
+                            if "error" in statuses[0]:
+                                err_msg = statuses[0]["error"]
+                                logger.error(f"Hyperliquid ha rebutjat l'ordre per a {coin}: {err_msg}")
+                                return {"status": "err", "error": err_msg, "raw": res}
+                elif res.get("status") == "err":
+                    logger.error(f"Hyperliquid ha retornat error: {res.get('response')}")
+                    return res
             return res
         except Exception as e:
             logger.error(f"Error executant ordre Hyperliquid: {e}")

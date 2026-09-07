@@ -142,3 +142,28 @@ def test_live_exchange_anti_unhedged_rollback_when_aevo_fails():
     # Hyperliquid ha d'haver estat tancat a mercat immediatament (Rollback de seguretat)
     assert hl_mock.market_close.called
     print("Anti-Unhedged Guard verificat: rollback de seguretat executat amb èxit!")
+
+def test_hyperliquid_order_error_detection():
+    with patch("core.hyperliquid_live_client.Exchange") as mock_ex, patch("core.hyperliquid_live_client.Info") as mock_info:
+        client = HyperliquidLiveClient(
+            wallet_address=DUMMY_ACCOUNT.address,
+            agent_private_key=DUMMY_KEY,
+            testnet=True,
+        )
+        # Simulem que Exchange.order retorna status 'ok' però amb error intern a statuses
+        client.exchange.order = MagicMock(return_value={
+            "status": "ok",
+            "response": {
+                "type": "order",
+                "data": {
+                    "statuses": [{"error": "Insufficient margin"}]
+                }
+            }
+        })
+
+        async def _test():
+            res = await client.place_order("HYPE", is_buy=True, size=1.0, price=85.0)
+            assert res["status"] == "err"
+            assert "Insufficient margin" in res["error"]
+
+        asyncio.run(_test())
