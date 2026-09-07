@@ -53,14 +53,14 @@ class ArbitrageTradingBotApp:
         weekend_min_spread: float = 0.100,
         min_profit_usd: float = 0.10,
         exit_spread: float = 0.010,
-        size_usd: float = 300.0,
+        size_usd: float = 250.0,
         headless: bool = False,
-        max_positions: int = 3,
+        max_positions: int = 4,
         max_book_spread: float = 0.350,
         initial_balance: float = 1000.0,
         leverage: float = 2.0,
         dynamic_size: bool = True,
-        size_pct: float = 30.0,
+        size_pct: float = 25.0,
         min_size_usd: float = 100.0,
         max_size_usd: float = 2500.0,
     ):
@@ -190,8 +190,8 @@ class ArbitrageTradingBotApp:
                 exit_eval = self.strategy.check_exit(pos)
                 if exit_eval:
                     reason, hl_px, bn_px = exit_eval
-                    # En tancaments ordenats (convergència o take profit), apliquem comissió passiva Maker (estalvi del 60% en sortida)
-                    is_maker_exit = reason in ("CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET")
+                    # En tancaments ordenats (convergència, take profit o breakeven per temps), apliquem comissió passiva Maker (estalvi del 60% en sortida)
+                    is_maker_exit = reason in ("CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET", "TIME_BREAKEVEN")
                     self.exchange.close_arbitrage_position(
                         pair_id=pos.pair_id,
                         hl_exit_price=hl_px,
@@ -334,6 +334,7 @@ class ArbitrageTradingBotApp:
         metrics["dynamic_size"] = self.dynamic_size
         metrics["current_order_size"] = current_size
         metrics["size_pct"] = self.size_pct
+        metrics["max_positions"] = self.max_positions
         is_wk = self.strategy.is_weekend_regime
         eff_spread = self.strategy.effective_min_spread
         metrics["is_weekend"] = is_wk
@@ -598,14 +599,14 @@ def main():
     weekend_min_spread_default = float(os.environ.get("WEEKEND_MIN_SPREAD", "0.100"))
     min_profit_default = float(os.environ.get("MIN_PROFIT", "0.10"))
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
-    max_positions_default = int(os.environ.get("MAX_POSITIONS", "3"))
+    max_positions_default = int(os.environ.get("MAX_POSITIONS", "4"))
     max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.350"))
     venue2_default = os.environ.get("VENUE2", "aevo").lower()
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
     leverage_default = float(os.environ.get("LEVERAGE", "2.0"))
     dynamic_size_default = os.environ.get("DYNAMIC_SIZE", "true").lower() in ("true", "1", "yes")
-    size_pct_default = float(os.environ.get("SIZE_PCT", "30.0"))
-    size_default = float(os.environ.get("SIZE", "300.0"))
+    size_pct_default = float(os.environ.get("SIZE_PCT", "25.0"))
+    size_default = float(os.environ.get("SIZE", "250.0"))
     min_size_default = float(os.environ.get("MIN_SIZE", "100.0"))
     max_size_default = float(os.environ.get("MAX_SIZE", "2500.0"))
 
@@ -615,17 +616,17 @@ def main():
     parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL)")
     parser.add_argument("--initial-balance", type=float, default=initial_balance_default, help="Capital inicial total en dòlars (default: 1000.0$)")
     parser.add_argument("--leverage", type=float, default=leverage_default, help="Apalancament conservador per a l'arbitratge (default: 2.0x)")
-    parser.add_argument("--size", type=float, default=size_default, help="Mida en dòlars per ordre/pota (default: 300.0$)")
+    parser.add_argument("--size", type=float, default=size_default, help="Mida en dòlars per ordre/pota (default: 250.0$)")
     parser.add_argument("--dynamic-size", dest="dynamic_size", action="store_true", default=dynamic_size_default, help="Ajustar automàticament la mida per interès compost (default: True)")
     parser.add_argument("--no-dynamic-size", dest="dynamic_size", action="store_false", help="Desactivar mida dinàmica i utilitzar mida fixa")
-    parser.add_argument("--size-pct", type=float, default=size_pct_default, help="Percentatge del capital total per a cada ordre (default: 30.0%%)")
+    parser.add_argument("--size-pct", type=float, default=size_pct_default, help="Percentatge del capital total per a cada ordre (default: 25.0%%)")
     parser.add_argument("--min-size", type=float, default=min_size_default, help="Mida mínima d'ordre en dòlars (default: 100.0$)")
     parser.add_argument("--max-size", type=float, default=max_size_default, help="Límit màxim de mida per seguretat de llibre (default: 2500.0$)")
     parser.add_argument("--min-spread", type=float, default=min_spread_default, help="Spread mínim percentual d'entrada entre setmana (default: 0.120%%)")
     parser.add_argument("--weekend-min-spread", type=float, default=weekend_min_spread_default, help="Spread mínim percentual d'entrada en cap de setmana (default: 0.100%%)")
     parser.add_argument("--min-profit", type=float, default=min_profit_default, help="Benefici net mínim permès per trade tancat (default: 0.10$)")
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
-    parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 3)")
+    parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 4)")
     parser.add_argument("--max-book-spread", type=float, default=max_book_spread_default, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.350%%)")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")

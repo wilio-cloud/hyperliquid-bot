@@ -27,7 +27,7 @@ class CrossExchangeArbitrageStrategy:
         take_profit_usd: float = 0.40,         # Tancament automàtic per benefici substancial (+0.40$)
         max_divergence_pct: float = 2.50,      # Stop de divergència (+2.50% addicional per a deslligaments reals, no metxes de 1 cèntim)
         divergence_min_duration_sec: float = 60.0, # Requereix que la divergència sigui sostinguda almenys 60 segons
-        max_hold_seconds: int = 43200,         # 12 hores màxim per posició (permet collir funding passiu)
+        max_hold_seconds: int = 1500,          # 25 minuts màxim absolut (evita bloquejos d'actius i allibera la ranura)
         max_book_spread_pct: float = 0.350,    # Llindar màxim d'spread intern (adaptat a llibres d'altcoins d'Aevo)
         per_coin_min_spread: Optional[Dict[str, float]] = None, # Llindars personalitzats per actiu
     ):
@@ -45,14 +45,16 @@ class CrossExchangeArbitrageStrategy:
         self.max_book_spread_pct = max_book_spread_pct
 
         # Llindars optimitzats per actiu per garantir 8-10 op/h durant tot el dia:
-        # ETH i SOL tenen spreads bid/ask mínims (0.01-0.02%) i comissions baixes,
-        # per la qual cosa amb 0.095% generen beneficis nets de sobres (+0.10$ a +0.15$ net).
+        # ETH, SOL, NEAR i HYPE tenen bona liquiditat i comissions baixes,
+        # per la qual cosa amb 0.095% generen beneficis nets de sobres (+0.10$ a +0.16$ net).
         self.per_coin_min_spread: Dict[str, float] = per_coin_min_spread or {
             "ETH": 0.095,
             "SOL": 0.095,
             "BTC": 0.080,
             "AVAX": 0.110,
             "DOGE": 0.110,
+            "NEAR": 0.095,
+            "HYPE": 0.095,
         }
 
         self.hl_books: Dict[str, OrderBookL2] = {}
@@ -212,9 +214,10 @@ class CrossExchangeArbitrageStrategy:
             )
 
         # Cas 3: Collita de Funding Rate (Carry Trade delta-neutral)
-        # Permet entrada si la diferència de funding és molt atractiva i el spread de preu no ens suposa pèrdua (>= -0.040%)
+        # Permet entrada NOMÉS si la diferència de funding és molt atractiva i el spread de preu és neutre o positiu (>= -0.005%)
+        # Evita estrictament entrar amb spread negatiu que bloquegi la rotació ràpida de scalping
         min_harvest_apr = self.min_funding_harvest_apr if self.is_weekend_regime else (self.min_funding_harvest_apr * 1.5)
-        if info.annual_funding_diff_apr >= min_harvest_apr and info.spread_sell_hl_buy_bn_pct >= -0.040:
+        if info.annual_funding_diff_apr >= min_harvest_apr and info.spread_sell_hl_buy_bn_pct >= -0.005:
             self.signals_count += 1
             return ArbitrageSignal(
                 coin=coin,
@@ -227,7 +230,7 @@ class CrossExchangeArbitrageStrategy:
                 net_funding_apr=info.annual_funding_diff_apr,
                 reason=f"Funding Harvest HL>BN (+{info.annual_funding_diff_apr:.1f}% APR)",
             )
-        elif -info.annual_funding_diff_apr >= min_harvest_apr and info.spread_buy_hl_sell_bn_pct >= -0.040:
+        elif -info.annual_funding_diff_apr >= min_harvest_apr and info.spread_buy_hl_sell_bn_pct >= -0.005:
             self.signals_count += 1
             return ArbitrageSignal(
                 coin=coin,
@@ -342,8 +345,18 @@ class CrossExchangeArbitrageStrategy:
             else:
                 pos.divergence_start_time = None
 
-        # Límit de temps de seguretat (12 hores)
-        if (time.time() - pos.entry_time) >= self.max_hold_seconds:
-            return ("TIME_LIMIT", hl_exit_px, bn_exit_px)
+        # 4. Gestió dinàmica per temps (Slot Recycling) per mantenir el ritme de 8-10 op/h:
+        pos_age = time.time() - pos.entry_time
+        # A) Si porta > 8 minuts (480s) i el PnL net és positiu o neutre (>= +0.02$), tanca immediatament
+        if pos_age >= 480.0 and projected_net_pnl >= 0.02:
+            return ("TIME_BREAKEVEN", hl_exit_px, bn_exit_px)
+
+        # B) Si porta > 15 minuts (900s) i està molt a prop del break-even (>= -0.15$), allibera la ranura
+        if pos_age >= 900.0 and projected_net_pnl >= -0.15:
+            return ("TIMEOUT_RECYCLE", hl_exit_px, bn_exit_px)
+
+        # C) Si supera el temps màxim (25 minuts = 1500s), forçar la sortida per desbloquejar l'actiu
+        if pos_age >= self.max_hold_seconds:
+            return ("MAX_HOLD_RELEASE", hl_exit_px, bn_exit_px)
 
         return None

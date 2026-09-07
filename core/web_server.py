@@ -329,8 +329,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 // Taula Posicions Actives
                 const posBody = document.getElementById('positions-body');
                 const posCount = document.getElementById('pos-count');
+                const maxPos = (data.metrics && data.metrics.max_positions) ? data.metrics.max_positions : 4;
                 if (data.positions && data.positions.length > 0) {
-                    posCount.innerText = `${data.positions.length} posició(ns)`;
+                    posCount.innerText = `${data.positions.length} / ${maxPos} posicions`;
                     posBody.innerHTML = data.positions.map(p => {
                         const pnlVal = p.unrealized_pnl || 0.0;
                         const pnlColor = pnlVal >= 0 ? 'green' : 'red';
@@ -352,7 +353,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         </tr>`;
                     }).join('');
                 } else {
-                    posCount.innerText = "0 posicions";
+                    posCount.innerText = `0 / ${maxPos} posicions`;
                     posBody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b;">Sense posicions actives en curs</td></tr>';
                 }
 
