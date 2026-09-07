@@ -75,6 +75,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <div class="sub" id="winrate-sub">Winrate: -%</div>
             </div>
             <div class="card">
+                <div class="label">Ritme Horari</div>
+                <div class="val" id="pace">-</div>
+                <div class="sub" id="pace-sub">Objectiu: 8-10 op/h</div>
+            </div>
+            <div class="card">
                 <div class="label">Comissions</div>
                 <div class="val purple" id="fees">-</div>
                 <div class="sub">Maker & Taker nets</div>
@@ -130,7 +135,32 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </table>
         </div>
 
-        <!-- Taula 3: Darreres Operacions Tancades -->
+        <!-- Taula 3: Control i Rendiment per Criptomoneda -->
+        <div class="card-table">
+            <div class="table-title">
+                <span>🎯 Control de Freqüència i Rendiment per Criptomoneda</span>
+                <span style="font-size: 0.8rem; font-weight: normal; color: #94a3b8;" id="pace-summary">Objectiu global: 8-10 op/h</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Moneda</th>
+                        <th>Trades</th>
+                        <th>Ritme (op/h)</th>
+                        <th>Winrate</th>
+                        <th>PnL Net Acumulat</th>
+                        <th>PnL Mitjà / Trade</th>
+                        <th>Temps Obert Mitjà</th>
+                        <th>Diagnòstic / Calibració</th>
+                    </tr>
+                </thead>
+                <tbody id="coin-stats-body">
+                    <tr><td colspan="8" style="text-align: center; color: #64748b;">Carregant mètriques per moneda...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Taula 4: Darreres Operacions Tancades -->
         <div class="card-table">
             <div class="table-title">
                 <span>📜 Darreres Operacions d'Arbitratge Tancades</span>
@@ -225,6 +255,30 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
                 document.getElementById('trades').innerText = `${m.total_trades || 0} (${m.wins || 0}W / ${m.losses || 0}L)`;
                 document.getElementById('winrate-sub').innerText = `Winrate: ${fmtNum(m.winrate_pct, 1)}%`;
+
+                // Ritme horari (Trades/h)
+                const paceEl = document.getElementById('pace');
+                const paceVal = (typeof m.trades_per_hour === 'number') ? m.trades_per_hour : 0.0;
+                if (paceEl) {
+                    paceEl.innerText = paceVal.toFixed(1) + ' op/h';
+                    if (paceVal >= 8.0) {
+                        paceEl.className = 'val green';
+                    } else if (paceVal >= 5.0) {
+                        paceEl.className = 'val yellow';
+                    } else {
+                        paceEl.className = 'val';
+                    }
+                }
+                const paceSub = document.getElementById('pace-sub');
+                if (paceSub) {
+                    paceSub.innerText = `Objectiu: ${m.target_trades_per_hour || '8-10'} op/h`;
+                }
+                const paceSumm = document.getElementById('pace-summary');
+                if (paceSumm) {
+                    const paceColor = paceVal >= 8.0 ? '#10b981' : (paceVal >= 5.0 ? '#facc15' : '#94a3b8');
+                    paceSumm.innerHTML = `Ritme actual: <b style="color: ${paceColor};">${paceVal.toFixed(1)} op/h</b> (Objectiu: 8-10 op/h)`;
+                }
+
                 document.getElementById('fees').innerText = fmtNum(m.total_fees, 4) + ' $';
                 document.getElementById('uptime').innerText = 'Temps actiu: ' + (data.uptime || '-');
 
@@ -302,6 +356,48 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     posBody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b;">Sense posicions actives en curs</td></tr>';
                 }
 
+                // Taula Control i Rendiment per Criptomoneda
+                const coinStatsBody = document.getElementById('coin-stats-body');
+                if (coinStatsBody && data.coin_stats && data.coin_stats.length > 0) {
+                    coinStatsBody.innerHTML = data.coin_stats.map(c => {
+                        const pnlVal = c.realized_pnl || 0.0;
+                        const pnlColor = pnlVal > 0 ? 'green' : (pnlVal < 0 ? 'red' : '');
+                        const pnlSign = pnlVal >= 0 ? '+' : '';
+                        const avgPnl = c.avg_pnl || 0.0;
+                        const avgPnlSign = avgPnl >= 0 ? '+' : '';
+
+                        let tagClass = 'tag-neutral';
+                        let tagStyle = '';
+                        if (c.diag_type === 'ACTIVE') {
+                            tagClass = 'tag-buy';
+                        } else if (c.diag_type === 'OPTIMAL') {
+                            tagStyle = 'background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981;';
+                        } else if (c.diag_type === 'GOOD') {
+                            tagStyle = 'background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #38bdf8;';
+                        } else if (c.diag_type === 'PROTECTED') {
+                            tagStyle = 'background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid #ef4444;';
+                        } else if (c.diag_type === 'NEAR') {
+                            tagStyle = 'background: rgba(250, 204, 21, 0.15); color: #facc15; border: 1px solid #eab308;';
+                        } else if (c.diag_type === 'TIGHT') {
+                            tagStyle = 'background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border: 1px solid #6366f1;';
+                        }
+
+                        const durationStr = c.trades_count > 0 ? (c.avg_duration_min > 0 ? `${c.avg_duration_min.toFixed(1)} min` : `${c.avg_duration_sec.toFixed(0)}s`) : '-';
+                        const paceColor = c.trades_per_hour >= 2.0 ? '#10b981' : (c.trades_per_hour > 0 ? '#38bdf8' : '#64748b');
+
+                        return `<tr>
+                            <td style="font-weight: bold; color: #facc15;">${c.coin}</td>
+                            <td>${c.trades_count} (${c.wins}W / ${c.losses}L)</td>
+                            <td style="font-weight: 600; color: ${paceColor};">${c.trades_per_hour.toFixed(1)} op/h</td>
+                            <td style="color: ${c.winrate_pct >= 80 ? '#10b981' : (c.trades_count === 0 ? '#64748b' : '#facc15')}; font-weight: bold;">${c.trades_count > 0 ? c.winrate_pct.toFixed(0) + '%' : '-'}</td>
+                            <td class="${pnlColor}" style="font-weight: bold;">${pnlSign}${fmtNum(pnlVal, 3)} $</td>
+                            <td class="${pnlColor}">${c.trades_count > 0 ? avgPnlSign + fmtNum(avgPnl, 3) + ' $' : '-'}</td>
+                            <td style="color: #94a3b8;">${durationStr}</td>
+                            <td><span class="tag-signal ${tagClass}" style="${tagStyle}">${c.diagnostic}</span></td>
+                        </tr>`;
+                    }).join('');
+                }
+
                 // Taula Tancades
                 const closedBody = document.getElementById('closed-body');
                 if (data.recent_closed && data.recent_closed.length > 0) {
@@ -356,12 +452,14 @@ class WebDashboardServer:
         spreads_data = []
         positions_data = []
         closed_data = []
+        coin_stats_data = []
 
         if hasattr(self.app_ref, "get_dashboard_data"):
             data = self.app_ref.get_dashboard_data()
             spreads_data = data.get("spreads", [])
             positions_data = data.get("positions", [])
             closed_data = data.get("recent_closed", [])
+            coin_stats_data = data.get("coin_stats", [])
             metrics = data.get("metrics", self.exchange.metrics)
         else:
             metrics = self.exchange.metrics
@@ -406,6 +504,7 @@ class WebDashboardServer:
             "spreads": spreads_data,
             "positions": positions_data,
             "recent_closed": closed_data,
+            "coin_stats": coin_stats_data,
         })
 
     async def start(self):

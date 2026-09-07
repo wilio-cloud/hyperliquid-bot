@@ -342,11 +342,84 @@ class ArbitrageTradingBotApp:
         metrics["regime_label"] = f"🗓️ CAP DE SETMANA ({eff_spread:.3f}%)" if is_wk else f"⚡ SETMANAL ({eff_spread:.3f}%)"
         metrics["max_book_spread"] = self.strategy.max_book_spread_pct
 
+        # Càlcul del ritme horari global i mètriques detallades per actiu (Coin Analytics)
+        elapsed_hours = max((time.time() - self.start_time) / 3600.0, 1.0 / 3600.0)
+        total_closed = len(self.exchange.closed_positions)
+        trades_per_hour = round(total_closed / elapsed_hours, 1)
+        metrics["trades_per_hour"] = trades_per_hour
+        metrics["target_trades_per_hour"] = "8-10"
+
+        coin_stats = []
+        for coin in self.coins:
+            coin_trades = [p for p in self.exchange.closed_positions if p.coin == coin]
+            c_count = len(coin_trades)
+            c_wins = len([p for p in coin_trades if p.realized_pnl > 0])
+            c_losses = len([p for p in coin_trades if p.realized_pnl <= 0])
+            c_winrate = (c_wins / c_count * 100.0) if c_count > 0 else 0.0
+            c_pnl = sum(p.realized_pnl for p in coin_trades)
+            c_avg_pnl = (c_pnl / c_count) if c_count > 0 else 0.0
+            c_pace = round(c_count / elapsed_hours, 1)
+
+            durations = [max(0.0, (p.exit_time - p.entry_time)) for p in coin_trades if p.exit_time]
+            avg_dur_sec = (sum(durations) / len(durations)) if durations else 0.0
+            avg_dur_min = round(avg_dur_sec / 60.0, 1)
+
+            has_active = self.exchange.has_open_position(coin)
+
+            # Diagnòstic de l'actiu per a calibració
+            if has_active:
+                diag = "⚡ Posició Oberta"
+                diag_type = "ACTIVE"
+            elif c_count >= 3 and c_winrate >= 90.0:
+                diag = "🔥 Òptim (Freqüent)"
+                diag_type = "OPTIMAL"
+            elif c_count > 0:
+                diag = "✅ Operant Bé"
+                diag_type = "GOOD"
+            else:
+                hl_book = self.strategy.hl_books.get(coin)
+                bn_book = self.strategy.bn_books.get(coin)
+                hl_inner = ((hl_book.best_ask - hl_book.best_bid) / hl_book.mid_price) * 100.0 if (hl_book and hl_book.mid_price) else 0.0
+                bn_inner = ((bn_book.best_ask - bn_book.best_bid) / bn_book.mid_price) * 100.0 if (bn_book and bn_book.mid_price) else 0.0
+                max_inner = max(hl_inner, bn_inner)
+                info = self.strategy.calculate_spread_info(coin)
+                best_exec_pct = max(info.spread_sell_hl_buy_bn_pct, info.spread_buy_hl_sell_bn_pct) if info else 0.0
+
+                if max_inner > self.strategy.max_book_spread_pct:
+                    diag = "⚠️ Llibre Ampli (Filtre)"
+                    diag_type = "PROTECTED"
+                elif best_exec_pct >= (self.strategy.effective_min_spread * 0.7):
+                    diag = "⏳ A prop del llindar"
+                    diag_type = "NEAR"
+                elif coin == "BTC":
+                    diag = "💎 Spread Estret (<0.03%)"
+                    diag_type = "TIGHT"
+                else:
+                    diag = "💤 Poca Dislocació"
+                    diag_type = "QUIET"
+
+            coin_stats.append({
+                "coin": coin,
+                "trades_count": c_count,
+                "trades_per_hour": c_pace,
+                "wins": c_wins,
+                "losses": c_losses,
+                "winrate_pct": c_winrate,
+                "realized_pnl": c_pnl,
+                "avg_pnl": c_avg_pnl,
+                "avg_duration_sec": avg_dur_sec,
+                "avg_duration_min": avg_dur_min,
+                "has_active": has_active,
+                "diagnostic": diag,
+                "diag_type": diag_type,
+            })
+
         return {
             "metrics": metrics,
             "spreads": spreads,
             "positions": positions,
             "recent_closed": recent_closed,
+            "coin_stats": coin_stats,
         }
 
     async def run(self, duration_sec: int = 0):

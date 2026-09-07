@@ -163,8 +163,13 @@ def generate_arbitrage_dashboard(app, start_time: float) -> Group:
     metrics = app.exchange.metrics
     pnl = metrics["net_pnl"]
     pnl_color = "green" if pnl >= 0 else "red"
-    v2_label = getattr(app, "venue2_label", "dYdX v4")
-    v2_short = "dYdX" if "dydx" in v2_label.lower() else "BN"
+    v2_label = getattr(app, "venue2_label", "Aevo DEX")
+    if "aevo" in v2_label.lower():
+        v2_short = "Aevo"
+    elif "dydx" in v2_label.lower():
+        v2_short = "dYdX"
+    else:
+        v2_short = "BN"
 
     # 1. Header
     header_text = Text()
@@ -185,6 +190,11 @@ def generate_arbitrage_dashboard(app, start_time: float) -> Group:
     header_text.append(f"{metrics['winrate_pct']:.1f}%   ", style="bold green" if metrics['winrate_pct'] >= 50 else "yellow")
     header_text.append("Comissions: ", style="bold")
     header_text.append(f"{metrics['total_fees']:.4f}$", style="bold magenta")
+    if "trades_per_hour" in metrics:
+        pace_val = metrics["trades_per_hour"]
+        pace_style = "bold green" if pace_val >= 8.0 else ("bold yellow" if pace_val >= 5.0 else "bold cyan")
+        header_text.append(f"   Ritme: ", style="bold")
+        header_text.append(f"{pace_val:.1f} op/h (Obj: 8-10)", style=pace_style)
 
     header_panel = Panel(header_text, border_style="green", title="Resum Arbitratge")
 

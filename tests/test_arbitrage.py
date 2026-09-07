@@ -1,6 +1,7 @@
 """Proves unitàries per al sistema d'arbitratge creuat (Hyperliquid vs Binance)."""
 
 import math
+import time
 from core.arbitrage_models import ArbitrageDirection, ArbitrageLeg, ArbitragePosition, ArbitrageSignal
 from core.arbitrage_paper_exchange import ArbitragePaperExchange
 from core.models import BookLevel, OrderBookL2, OrderSide
@@ -396,6 +397,58 @@ def test_dynamic_proportional_take_profit():
     assert exit_res[0] == "TAKE_PROFIT_TARGET", "Hauria d'haver executat TAKE_PROFIT_TARGET immediatament!"
     print("  Take Profit dinàmic proporcional verificat amb èxit.")
 
+def test_coin_stats_and_pace_tracking():
+    """Verifica el càlcul de mètriques per moneda i el ritme d'operacions (trades/h)."""
+    from main import ArbitrageTradingBotApp
+    app = ArbitrageTradingBotApp(
+        coins=["NEAR", "SOL", "BTC"],
+        venue2="aevo",
+        headless=True,
+    )
+    # Simular 1 hora transcorreguda
+    app.start_time = time.time() - 3600.0
+
+    # Simulem que hem tancat 2 operacions guanyadores a NEAR i 1 a SOL
+    sig_near = ArbitrageSignal(coin="NEAR", direction=ArbitrageDirection.SELL_HL_BUY_BN, hl_price=2.30, bn_price=2.29, spread_pct=0.150)
+    pos1 = app.exchange.open_arbitrage_position(sig_near, size_usd=300.0)
+    app.exchange.close_arbitrage_position(pos1.pair_id, hl_exit_price=2.295, bn_exit_price=2.295, reason="TAKE_PROFIT_TARGET")
+
+    pos2 = app.exchange.open_arbitrage_position(sig_near, size_usd=300.0)
+    app.exchange.close_arbitrage_position(pos2.pair_id, hl_exit_price=2.295, bn_exit_price=2.295, reason="TAKE_PROFIT_TARGET")
+
+    sig_sol = ArbitrageSignal(coin="SOL", direction=ArbitrageDirection.SELL_HL_BUY_BN, hl_price=105.0, bn_price=104.8, spread_pct=0.140)
+    pos3 = app.exchange.open_arbitrage_position(sig_sol, size_usd=300.0)
+    app.exchange.close_arbitrage_position(pos3.pair_id, hl_exit_price=104.9, bn_exit_price=104.9, reason="TAKE_PROFIT_TARGET")
+
+    data = app.get_dashboard_data()
+    m = data["metrics"]
+    assert "trades_per_hour" in m
+    assert m["trades_per_hour"] == 3.0  # 3 trades en 1 hora
+    assert m["target_trades_per_hour"] == "8-10"
+
+    assert "coin_stats" in data
+    stats = {c["coin"]: c for c in data["coin_stats"]}
+    assert "NEAR" in stats
+    assert "SOL" in stats
+    assert "BTC" in stats
+
+    near_st = stats["NEAR"]
+    assert near_st["trades_count"] == 2
+    assert near_st["wins"] == 2
+    assert near_st["winrate_pct"] == 100.0
+    assert near_st["realized_pnl"] > 0
+    assert near_st["trades_per_hour"] == 2.0
+
+    sol_st = stats["SOL"]
+    assert sol_st["trades_count"] == 1
+    assert sol_st["trades_per_hour"] == 1.0
+
+    btc_st = stats["BTC"]
+    assert btc_st["trades_count"] == 0
+    assert btc_st["diag_type"] == "TIGHT"
+
+    print("  Control de freqüència i analítica per moneda verificats amb èxit.")
+
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
     test_arbitrage_execution_and_pnl()
@@ -407,4 +460,5 @@ if __name__ == "__main__":
     test_dashboard_signal_status_accuracy()
     test_weekend_regime_and_funding_harvest()
     test_dynamic_proportional_take_profit()
+    test_coin_stats_and_pace_tracking()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")
