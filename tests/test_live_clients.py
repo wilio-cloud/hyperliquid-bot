@@ -71,8 +71,10 @@ def test_live_exchange_atomic_open_both_legs_success():
         initial_hl_balance=500.0,
         initial_bn_balance=500.0,
         leverage=2.0,
-        state_file="/tmp/test_live_state.json",
+        state_file="/tmp/test_live_state_clean.json",
     )
+    exchange.active_positions.clear()
+    exchange.closed_positions.clear()
 
     sig = ArbitrageSignal(
         coin="SOL",
@@ -118,6 +120,8 @@ def test_live_exchange_anti_unhedged_rollback_when_aevo_fails():
         leverage=2.0,
         state_file="/tmp/test_live_state_rollback.json",
     )
+    exchange.active_positions.clear()
+    exchange.closed_positions.clear()
 
     sig = ArbitrageSignal(
         coin="HYPE",

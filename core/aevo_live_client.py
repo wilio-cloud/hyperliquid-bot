@@ -66,7 +66,22 @@ class AevoLiveClient:
         self.wallet_address = wallet_address.lower()
         self.api_key = api_key
         self.api_secret = api_secret
-        clean_key = signing_key if signing_key.startswith("0x") else f"0x{signing_key}"
+        clean_key = signing_key.strip()
+        if not clean_key.startswith("0x"):
+            clean_key = f"0x{clean_key}"
+
+        if len(clean_key) != 66:
+            if len(clean_key) == 42:
+                raise ValueError(
+                    f"AEVO_SIGNING_KEY és una adreça pública ({clean_key}), no una clau privada! "
+                    f"A Aevo, cal la CLAU PRIVADA de la Signing Key (64 caràcters hexadecimals / 32 bytes). "
+                    f"Pots crear una nova signing key a Settings si no la vas copiar."
+                )
+            raise ValueError(
+                f"AEVO_SIGNING_KEY té una llargada invàlida ({len(clean_key)} caràcters). "
+                f"Una clau privada d'Ethereum ha de tenir 64 caràcters hexadecimals (o 66 amb '0x')."
+            )
+
         self.signing_key = clean_key
         self.env = env
         

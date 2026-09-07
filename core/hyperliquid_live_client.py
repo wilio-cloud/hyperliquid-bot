@@ -33,7 +33,22 @@ class HyperliquidLiveClient:
         self.base_url = constants.TESTNET_API_URL if testnet else constants.MAINNET_API_URL
 
         # Creació del compte de signatura de l'Agent
-        clean_key = agent_private_key if agent_private_key.startswith("0x") else f"0x{agent_private_key}"
+        clean_key = agent_private_key.strip()
+        if not clean_key.startswith("0x"):
+            clean_key = f"0x{clean_key}"
+
+        if len(clean_key) != 66:
+            if len(clean_key) == 42:
+                raise ValueError(
+                    f"HL_AGENT_PRIVATE_KEY és una adreça pública ({clean_key}), no una clau privada! "
+                    f"A Hyperliquid, quan crees un API Agent, et mostra la 'Agent Private Key' "
+                    f"(64 caràcters hexadecimals / 32 bytes). Si us plau, genera un nou agent si no la vas copiar."
+                )
+            raise ValueError(
+                f"HL_AGENT_PRIVATE_KEY té una llargada invàlida ({len(clean_key)} caràcters). "
+                f"Una clau privada d'Ethereum ha de tenir 64 caràcters hexadecimals (o 66 amb '0x')."
+            )
+
         self.agent_account = Account.from_key(clean_key)
         
         # Inicialització del client d'Exchange i Info
