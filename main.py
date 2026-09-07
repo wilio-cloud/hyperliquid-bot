@@ -424,15 +424,15 @@ class ArbitrageTradingBotApp:
         total_closed = len(self.exchange.closed_positions)
         trades_per_hour = round(total_closed / elapsed_hours, 1)
         metrics["trades_per_hour"] = trades_per_hour
-        metrics["target_trades_per_hour"] = "8-10"
+        metrics["target_trades_per_hour"] = "4-6"
 
         realized_pnl_total = sum(p.realized_pnl for p in self.exchange.closed_positions)
-        avg_trade_pnl = (realized_pnl_total / total_closed) if total_closed > 0 else 0.12
-        live_pace = trades_per_hour if trades_per_hour > 0 else 8.0
+        avg_trade_pnl = (realized_pnl_total / total_closed) if total_closed > 0 else 0.25
+        live_pace = trades_per_hour if trades_per_hour > 0 else 4.0
         cur_hourly_rate = live_pace * avg_trade_pnl
         bal = self.exchange.total_balance_usd
 
-        # Model de projeccions i simulador d'escenaris
+        # Model de projeccions i simulador d'escenaris (Nova Realitat: spreads >=0.28%, ~0.25$/trade net)
         scenarios_dict = {
             "current_measured": {
                 "id": "current_measured",
@@ -447,36 +447,36 @@ class ArbitrageTradingBotApp:
             },
             "expected": {
                 "id": "expected",
-                "label": "Escenari Objectiu (8-10 op/h)",
-                "pace_h": 9.0,
-                "avg_profit": 0.12,
-                "hourly_rate": 1.08,
-                "day_profit": 25.92,
-                "week_profit": 181.44,
-                "month_profit": 777.60,
-                "month_roi_pct": round((777.60 / bal) * 100.0, 1),
+                "label": "Escenari Objectiu (4-6 op/h)",
+                "pace_h": 4.5,
+                "avg_profit": 0.25,
+                "hourly_rate": round(4.5 * 0.25, 2),
+                "day_profit": round(4.5 * 0.25 * 24, 2),
+                "week_profit": round(4.5 * 0.25 * 24 * 7, 2),
+                "month_profit": round(4.5 * 0.25 * 24 * 30, 2),
+                "month_roi_pct": round((4.5 * 0.25 * 24 * 30 / bal) * 100.0, 1),
             },
             "conservative": {
                 "id": "conservative",
-                "label": "Escenari Conservador (5 op/h)",
-                "pace_h": 5.0,
-                "avg_profit": 0.08,
-                "hourly_rate": 0.40,
-                "day_profit": 9.60,
-                "week_profit": 67.20,
-                "month_profit": 288.00,
-                "month_roi_pct": round((288.00 / bal) * 100.0, 1),
+                "label": "Escenari Conservador (2-3 op/h)",
+                "pace_h": 2.5,
+                "avg_profit": 0.20,
+                "hourly_rate": round(2.5 * 0.20, 2),
+                "day_profit": round(2.5 * 0.20 * 24, 2),
+                "week_profit": round(2.5 * 0.20 * 24 * 7, 2),
+                "month_profit": round(2.5 * 0.20 * 24 * 30, 2),
+                "month_roi_pct": round((2.5 * 0.20 * 24 * 30 / bal) * 100.0, 1),
             },
             "ny_volatility": {
                 "id": "ny_volatility",
-                "label": "Obertura NY / Volatilitat (12-15 op/h)",
-                "pace_h": 14.0,
-                "avg_profit": 0.15,
-                "hourly_rate": 2.10,
-                "day_profit": 50.40,
-                "week_profit": 352.80,
-                "month_profit": 1512.00,
-                "month_roi_pct": round((1512.00 / bal) * 100.0, 1),
+                "label": "Obertura NY / Volatilitat (7-9 op/h)",
+                "pace_h": 7.5,
+                "avg_profit": 0.30,
+                "hourly_rate": round(7.5 * 0.30, 2),
+                "day_profit": round(7.5 * 0.30 * 24, 2),
+                "week_profit": round(7.5 * 0.30 * 24 * 7, 2),
+                "month_profit": round(7.5 * 0.30 * 24 * 30, 2),
+                "month_roi_pct": round((7.5 * 0.30 * 24 * 30 / bal) * 100.0, 1),
             },
         }
 

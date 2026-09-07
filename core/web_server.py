@@ -107,7 +107,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="card">
                 <div class="label">Ritme Horari</div>
                 <div class="val" id="pace">-</div>
-                <div class="sub" id="pace-sub">Objectiu: 8-10 op/h</div>
+                <div class="sub" id="pace-sub">Objectiu: 4-6 op/h</div>
             </div>
             <div class="card">
                 <div class="label">Comissions</div>
@@ -124,7 +124,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         📈 Trajectòria d'Equitat en Viu i Simulador de Creixement
                     </h2>
                     <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 3px;">
-                        Model compost a 25% de capital per ordre • Projeccions d'alta freqüència segons volum d'operacions
+                        Model compost a 25% de capital per ordre • Llindars reals ≥0.28% • Marge net: +0.22$ a +0.45$/trade (12 parells)
                     </div>
                 </div>
                 <div id="ny-session-badge" class="ny-badge ny-pre">
@@ -142,10 +142,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
                 <div class="toggles-group">
                     <span class="toggle-chip chip-real" id="chip-real" onclick="toggleCurve('real')">🟣 Equitat Real</span>
-                    <span class="toggle-chip chip-actual" id="chip-actual" onclick="toggleCurve('actual')">🟢 Ritme Actual (<span id="lbl-pace-act">8.0</span> op/h)</span>
-                    <span class="toggle-chip chip-target" id="chip-target" onclick="toggleCurve('target')">🔵 Objectiu (9.0 op/h)</span>
-                    <span class="toggle-chip chip-cons" id="chip-cons" onclick="toggleCurve('conservative')">🟡 Conservador (5.0 op/h)</span>
-                    <span class="toggle-chip chip-ny" id="chip-ny" onclick="toggleCurve('ny')">🟠 Volatilitat NY (14 op/h)</span>
+                    <span class="toggle-chip chip-actual" id="chip-actual" onclick="toggleCurve('actual')">🟢 Ritme Actual (<span id="lbl-pace-act">4.0</span> op/h)</span>
+                    <span class="toggle-chip chip-target" id="chip-target" onclick="toggleCurve('target')">🔵 Objectiu (4.5 op/h)</span>
+                    <span class="toggle-chip chip-cons" id="chip-cons" onclick="toggleCurve('conservative')">🟡 Conservador (2.5 op/h)</span>
+                    <span class="toggle-chip chip-ny" id="chip-ny" onclick="toggleCurve('ny')">🟠 Volatilitat NY (7.5 op/h)</span>
                     <span class="toggle-chip chip-custom" id="chip-custom" onclick="toggleCurve('custom')">⚪ Slider Personalitzat</span>
                 </div>
             </div>
@@ -153,8 +153,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <!-- Slider Interactiu de Ritme -->
             <div class="slider-container">
                 <span style="font-weight: 600; white-space: nowrap;">⚡ Simular Ritme:</span>
-                <input type="range" id="sim-slider" min="1" max="25" step="0.5" value="8.0" oninput="onSliderInput(this.value)">
-                <span id="slider-label" style="font-weight: bold; color: #38bdf8; min-width: 70px;">8.0 op/h</span>
+                <input type="range" id="sim-slider" min="0.5" max="15" step="0.5" value="4.0" oninput="onSliderInput(this.value)">
+                <span id="slider-label" style="font-weight: bold; color: #38bdf8; min-width: 70px;">4.0 op/h</span>
                 <span id="slider-gain-est" style="font-weight: 600; color: #10b981; margin-left: auto;">...</span>
             </div>
 
@@ -300,7 +300,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         let chartInstance = null;
         let currentHorizon = 24; // 24, 72, 168, 720 hores
-        let customSliderPace = 8.0;
+        let customSliderPace = 4.0;
         let curveVisibility = {
             real: true,
             actual: true,
@@ -346,7 +346,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                             spanGaps: false
                         },
                         {
-                            label: 'Objectiu (8-10 op/h)',
+                            label: 'Objectiu (4.5 op/h • +0.25$)',
                             data: [],
                             borderColor: '#38bdf8',
                             borderWidth: 2,
@@ -356,7 +356,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                             spanGaps: false
                         },
                         {
-                            label: 'Conservador (5 op/h)',
+                            label: 'Conservador (2.5 op/h • +0.20$)',
                             data: [],
                             borderColor: '#facc15',
                             borderWidth: 2,
@@ -366,7 +366,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                             spanGaps: false
                         },
                         {
-                            label: 'Volatilitat NY (14 op/h)',
+                            label: 'Volatilitat NY (7.5 op/h • +0.30$)',
                             data: [],
                             borderColor: '#f97316',
                             borderWidth: 2,
@@ -437,13 +437,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const data = cachedStatusData;
             const m = data.metrics || {};
             const curBal = (typeof m.balance === 'number') ? m.balance : 1000.0;
-            const curPace = (typeof m.trades_per_hour === 'number' && m.trades_per_hour > 0) ? m.trades_per_hour : 8.0;
-            const avgProfit = (data.projections && data.projections.avg_pnl_per_trade) ? data.projections.avg_pnl_per_trade : 0.117;
+            const initialBal = (typeof m.initial_balance === 'number' && m.initial_balance > 0) ? m.initial_balance : curBal;
+            const curPace = (typeof m.trades_per_hour === 'number' && m.trades_per_hour > 0) ? m.trades_per_hour : 4.0;
+            const avgProfit = (data.projections && data.projections.avg_pnl_per_trade && data.projections.avg_pnl_per_trade > 0) ? data.projections.avg_pnl_per_trade : 0.25;
 
-            const profitPerTrade = avgProfit > 0 ? avgProfit : 0.117;
+            const profitPerTrade = avgProfit;
             const ratePerTrade = profitPerTrade / curBal;
 
-            // 1. Punts històrics reals
+            // 1. Punts històrics reals (evitem la caiguda fictícia des de 1000$)
             const hist = data.equity_history || [];
             const recentHist = hist.length > 8 ? hist.slice(-8) : hist;
             
@@ -459,7 +460,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 });
             } else {
                 labels.push('Inici', 'Ara');
-                realData.push(1000.0, curBal);
+                realData.push(initialBal, curBal);
             }
 
             const junctionIdx = labels.length - 1;
@@ -489,24 +490,26 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 realData.push(null);
             }
 
-            // Funció per calcular la corba composta
-            function calcCurve(pace) {
+            // Funció per calcular la corba composta amb paràmetres específics per escenari
+            function calcCurve(pace, tradePnl) {
                 let arr = new Array(junctionIdx).fill(null);
                 arr.push(curBal); // unió exacta a 'Ara'
+                const pft = (typeof tradePnl === 'number') ? tradePnl : profitPerTrade;
+                const rate = pft / curBal;
                 for (let i = 0; i < futureHours.length; i++) {
                     const h = futureHours[i];
                     const numTrades = pace * h;
-                    const bal = curBal * Math.pow(1.0 + ratePerTrade, numTrades);
+                    const bal = curBal * Math.pow(1.0 + rate, numTrades);
                     arr.push(bal);
                 }
                 return arr;
             }
 
-            const actualCurve = calcCurve(curPace);
-            const targetCurve = calcCurve(9.0);
-            const consCurve = calcCurve(5.0);
-            const nyCurve = calcCurve(14.0);
-            const customCurve = calcCurve(customSliderPace);
+            const actualCurve = calcCurve(curPace, profitPerTrade);
+            const targetCurve = calcCurve(4.5, 0.25);
+            const consCurve = calcCurve(2.5, 0.20);
+            const nyCurve = calcCurve(7.5, 0.30);
+            const customCurve = calcCurve(customSliderPace, profitPerTrade);
 
             chartInstance.data.labels = labels;
             chartInstance.data.datasets[0].data = realData;
@@ -533,26 +536,33 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const horizonLbl = currentHorizon === 24 ? '24h' : (currentHorizon === 72 ? '3 dies' : (currentHorizon === 168 ? '7 dies' : '30 dies'));
             const sliderGainEl = document.getElementById('slider-gain-est');
             if (sliderGainEl) {
-                sliderGainEl.innerHTML = `Est. a ${horizonLbl}: <b style="color: #34d399;">${sliderFinalBal.toFixed(1)}$ (+${sliderGainPct.toFixed(1)}%)</b>`;
+                sliderGainEl.innerHTML = `Est. a ${horizonLbl}: <b style="color: #34d399;">${sliderFinalBal.toFixed(1)}$ (+${sliderGainPct.toFixed(1)}%)</b> <span style="color: #94a3b8; font-size: 0.78rem;">(~${(customSliderPace * profitPerTrade).toFixed(2)}$/h net)</span>`;
             }
 
             // Actualització KPIs de simulació
             const kpiRealBal = document.getElementById('kpi-real-bal');
             if (kpiRealBal) kpiRealBal.innerText = `${curBal.toFixed(2)} $`;
             const kpiRealSub = document.getElementById('kpi-real-sub');
-            if (kpiRealSub) kpiRealSub.innerText = `+${(m.realized_pnl || 0).toFixed(2)}$ (${fmtNum(m.winrate_pct, 0)}% winrate)`;
+            if (kpiRealSub) {
+                const totalTrades = m.total_trades || 0;
+                if (totalTrades === 0) {
+                    kpiRealSub.innerText = `${(m.realized_pnl || 0) >= 0 ? '+' : ''}${(m.realized_pnl || 0).toFixed(2)}$ (Monitoritzant en viu)`;
+                } else {
+                    kpiRealSub.innerText = `${(m.realized_pnl || 0) >= 0 ? '+' : ''}${(m.realized_pnl || 0).toFixed(2)}$ (${fmtNum(m.winrate_pct, 0)}% winrate)`;
+                }
+            }
 
             const est24 = curBal * Math.pow(1.0 + ratePerTrade, curPace * 24);
             const kpi24 = document.getElementById('kpi-24h-val');
             if (kpi24) kpi24.innerText = `~${est24.toFixed(1)} $`;
             const kpi24Sub = document.getElementById('kpi-24h-sub');
-            if (kpi24Sub) kpi24Sub.innerText = `+${((est24 - curBal) / curBal * 100).toFixed(1)}% (${curPace.toFixed(1)} op/h)`;
+            if (kpi24Sub) kpi24Sub.innerText = `+${((est24 - curBal) / curBal * 100).toFixed(1)}% (${curPace.toFixed(1)} op/h • ~${profitPerTrade.toFixed(2)}$)`;
 
             const est7d = curBal * Math.pow(1.0 + ratePerTrade, curPace * 168);
             const kpi7d = document.getElementById('kpi-7d-val');
             if (kpi7d) kpi7d.innerText = `~${est7d.toFixed(1)} $`;
             const kpi7dSub = document.getElementById('kpi-7d-sub');
-            if (kpi7dSub) kpi7dSub.innerText = `+${((est7d - curBal) / curBal * 100).toFixed(1)}% compost`;
+            if (kpi7dSub) kpi7dSub.innerText = `+${((est7d - curBal) / curBal * 100).toFixed(1)}% compost (7 dies)`;
 
             const est30d = curBal * Math.pow(1.0 + ratePerTrade, curPace * 720);
             const kpi30d = document.getElementById('kpi-30d-val');
@@ -703,12 +713,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 }
                 const paceSub = document.getElementById('pace-sub');
                 if (paceSub) {
-                    paceSub.innerText = `Objectiu: ${m.target_trades_per_hour || '8-10'} op/h`;
+                    paceSub.innerText = `Objectiu: ${m.target_trades_per_hour || '4-6'} op/h`;
                 }
                 const paceSumm = document.getElementById('pace-summary');
                 if (paceSumm) {
-                    const paceColor = paceVal >= 8.0 ? '#10b981' : (paceVal >= 5.0 ? '#facc15' : '#94a3b8');
-                    paceSumm.innerHTML = `Ritme actual: <b style="color: ${paceColor};">${paceVal.toFixed(1)} op/h</b> (Objectiu: 8-10 op/h)`;
+                    const paceColor = paceVal >= 4.0 ? '#10b981' : (paceVal >= 2.0 ? '#facc15' : '#94a3b8');
+                    paceSumm.innerHTML = `Ritme actual: <b style="color: ${paceColor};">${paceVal.toFixed(1)} op/h</b> (Objectiu: ${m.target_trades_per_hour || '4-6'} op/h)`;
                 }
 
                 document.getElementById('fees').innerText = fmtNum(m.total_fees, 4) + ' $';
@@ -717,7 +727,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 // Actualització del Simulador i Gràfica Interactiva
                 cachedStatusData = data;
                 const paceActEl = document.getElementById('lbl-pace-act');
-                if (paceActEl) paceActEl.innerText = paceVal.toFixed(1);
+                if (paceActEl) paceActEl.innerText = paceVal > 0 ? paceVal.toFixed(1) : '4.0';
                 try {
                     if (!chartInstance && typeof Chart !== 'undefined') {
                         initChart();

@@ -425,7 +425,7 @@ def test_coin_stats_and_pace_tracking():
     m = data["metrics"]
     assert "trades_per_hour" in m
     assert m["trades_per_hour"] == 3.0  # 3 trades en 1 hora
-    assert m["target_trades_per_hour"] == "8-10"
+    assert m["target_trades_per_hour"] == "4-6"
 
     assert "coin_stats" in data
     stats = {c["coin"]: c for c in data["coin_stats"]}
