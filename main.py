@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.live import Live
 
 from config.settings import config
+from core.aevo_ws_client import AevoWSClient
 from core.arbitrage_models import ArbitrageDirection, ArbitragePosition, ArbitrageSignal
 from core.arbitrage_paper_exchange import ArbitragePaperExchange
 from core.binance_ws_client import BinanceFuturesWSClient, get_ssl_context
@@ -65,7 +66,13 @@ class ArbitrageTradingBotApp:
     ):
         self.coins = coins
         self.venue2 = venue2.lower()
-        self.venue2_label = "dYdX v4" if self.venue2 == "dydx" else "Binance"
+        if self.venue2 == "aevo":
+            self.venue2_label = "Aevo DEX"
+        elif self.venue2 == "dydx":
+            self.venue2_label = "dYdX v4"
+        else:
+            self.venue2_label = "Binance"
+
         self.size_usd = size_usd
         self.headless = headless
         self.max_positions = max_positions
@@ -98,7 +105,13 @@ class ArbitrageTradingBotApp:
             coins=self.coins,
             on_book_update=self.handle_hl_book,
         )
-        if self.venue2 == "dydx":
+        if self.venue2 == "aevo":
+            self.venue2_ws = AevoWSClient(
+                coins=self.coins,
+                on_book_update=self.handle_venue2_book,
+                on_funding_update=self.handle_venue2_funding,
+            )
+        elif self.venue2 == "dydx":
             self.venue2_ws = DydxV4WSClient(
                 coins=self.coins,
                 on_book_update=self.handle_venue2_book,
@@ -512,7 +525,7 @@ def main():
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
     max_positions_default = int(os.environ.get("MAX_POSITIONS", "3"))
     max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.160"))
-    venue2_default = os.environ.get("VENUE2", "dydx").lower()
+    venue2_default = os.environ.get("VENUE2", "aevo").lower()
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
     leverage_default = float(os.environ.get("LEVERAGE", "2.0"))
     dynamic_size_default = os.environ.get("DYNAMIC_SIZE", "true").lower() in ("true", "1", "yes")
@@ -521,9 +534,9 @@ def main():
     min_size_default = float(os.environ.get("MIN_SIZE", "100.0"))
     max_size_default = float(os.environ.get("MAX_SIZE", "2500.0"))
 
-    parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + dYdX / Binance)")
+    parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + Aevo / dYdX / Binance)")
     parser.add_argument("--mode", choices=["arbitrage", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (recomanat) o 'scalper'")
-    parser.add_argument("--venue2", choices=["dydx", "binance"], default=venue2_default, help="Segon exchange per a l'arbitratge: 'dydx' (100%% DEX descentralitzat, legal a la UE/Espanya) o 'binance'")
+    parser.add_argument("--venue2", choices=["aevo", "dydx", "binance"], default=venue2_default, help="Segon exchange per a l'arbitratge: 'aevo' (100%% DEX d'alta freqüència i liquiditat d'altcoins), 'dydx' o 'binance'")
     parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL)")
     parser.add_argument("--initial-balance", type=float, default=initial_balance_default, help="Capital inicial total en dòlars (default: 1000.0$)")
     parser.add_argument("--leverage", type=float, default=leverage_default, help="Apalancament conservador per a l'arbitratge (default: 2.0x)")

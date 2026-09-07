@@ -126,7 +126,11 @@ def test_funding_accrual():
 
 def test_profit_guard_blocks_unprofitable_convergence():
     """Verifica que el bot NO tanca per convergència si el benefici net projectat no cobreix comissions."""
-    exchange = ArbitragePaperExchange(initial_hl_balance=5000.0, initial_bn_balance=5000.0)
+    exchange = ArbitragePaperExchange(
+        initial_hl_balance=5000.0,
+        initial_bn_balance=5000.0,
+        venue2_name="BINANCE",
+    )
     strat = CrossExchangeArbitrageStrategy(
         min_entry_spread_pct=0.180,
         target_exit_spread_pct=0.010,

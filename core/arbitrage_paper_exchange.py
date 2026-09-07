@@ -19,12 +19,12 @@ class ArbitragePaperExchange:
         self,
         initial_hl_balance: float = 500.0,
         initial_bn_balance: float = 500.0,
-        venue2_name: str = "DYDX",
+        venue2_name: str = "AEVO",
         leverage: float = 2.0,
         hl_maker_fee: float = 0.00010,  # 0.010%
         hl_taker_fee: float = 0.00035,  # 0.035%
-        bn_maker_fee: float = 0.00020,  # 0.020% (dYdX maker)
-        bn_taker_fee: float = 0.00040,  # 0.040% (dYdX taker)
+        bn_maker_fee: Optional[float] = None,
+        bn_taker_fee: Optional[float] = None,
         on_open_cb: Optional[Callable[[ArbitragePosition], None]] = None,
         on_close_cb: Optional[Callable[[ArbitragePosition, str, float], None]] = None,
     ):
@@ -39,8 +39,24 @@ class ArbitragePaperExchange:
 
         self.hl_maker_fee = hl_maker_fee
         self.hl_taker_fee = hl_taker_fee
-        self.bn_maker_fee = bn_maker_fee
-        self.bn_taker_fee = bn_taker_fee
+
+        if bn_maker_fee is not None:
+            self.bn_maker_fee = bn_maker_fee
+        elif self.venue2_name == "AEVO":
+            self.bn_maker_fee = 0.00000  # 0.00% maker a Aevo
+        elif self.venue2_name == "DYDX":
+            self.bn_maker_fee = 0.00020  # 0.020%
+        else:
+            self.bn_maker_fee = 0.00020  # Binance
+
+        if bn_taker_fee is not None:
+            self.bn_taker_fee = bn_taker_fee
+        elif self.venue2_name == "AEVO":
+            self.bn_taker_fee = 0.00025  # 0.025% taker a Aevo
+        elif self.venue2_name == "DYDX":
+            self.bn_taker_fee = 0.00040  # 0.040%
+        else:
+            self.bn_taker_fee = 0.00040  # Binance
 
         self.on_open_cb = on_open_cb
         self.on_close_cb = on_close_cb

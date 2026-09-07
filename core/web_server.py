@@ -45,7 +45,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <header>
             <div>
                 <h1>⚡ Arbitratge Delta-Neutral <span class="badge">EN VIU</span></h1>
-                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="header-sub">Hyperliquid DEX vs dYdX v4 • 100% Descentralitzat (DEX-to-DEX)</div>
+                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="header-sub">Hyperliquid DEX vs Aevo DEX • 100% Descentralitzat (DEX-to-DEX)</div>
             </div>
             <div style="text-align: right;">
                 <span class="badge-strategy" id="mode-tag">DELTA-NEUTRAL ARB (2x)</span>
@@ -171,16 +171,25 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const data = await res.json();
                 const m = data.metrics || {};
                 
-                const isDydx = (m.venue2_name || 'DYDX').toUpperCase() === 'DYDX';
-                const v2Name = isDydx ? 'dYdX v4' : 'Binance';
-                const v2Short = isDydx ? 'dYdX' : 'BN';
+                const venueRaw = (m.venue2_name || 'AEVO').toUpperCase();
+                let v2Name = 'Aevo DEX';
+                let v2Short = 'Aevo';
+                let subText = 'Hyperliquid DEX vs Aevo DEX • 100% Descentralitzat (DEX-to-DEX)';
+
+                if (venueRaw === 'DYDX') {
+                    v2Name = 'dYdX v4';
+                    v2Short = 'dYdX';
+                    subText = 'Hyperliquid DEX vs dYdX v4 • 100% Descentralitzat (DEX-to-DEX)';
+                } else if (venueRaw === 'BINANCE') {
+                    v2Name = 'Binance';
+                    v2Short = 'BN';
+                    subText = 'Hyperliquid DEX vs Binance Futures • 0% Risc Direccional';
+                }
 
                 document.title = `Arbitratge Delta-Neutral • Hyperliquid vs ${v2Name}`;
                 const subEl = document.getElementById('header-sub');
                 if (subEl) {
-                    subEl.innerText = isDydx
-                        ? 'Hyperliquid DEX vs dYdX v4 • 100% Descentralitzat (DEX-to-DEX)'
-                        : 'Hyperliquid DEX vs Binance Futures • 0% Risc Direccional';
+                    subEl.innerText = subText;
                 }
                 const thPx = document.getElementById('th-venue2-px');
                 if (thPx) thPx.innerText = `Preu ${v2Name}`;
