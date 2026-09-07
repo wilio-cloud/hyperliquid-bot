@@ -741,7 +741,7 @@ def main():
         if args.venue2 == "dydx":
             default_coins = ["BTC", "ETH", "SOL"]
         elif args.venue2 == "aevo":
-            default_coins = ["BTC", "ETH", "SOL", "HYPE", "NEAR", "XRP", "PUMP"]
+            default_coins = ["ETH", "SOL", "HYPE", "NEAR", "PUMP", "SUI", "DOGE"]
         else:
             default_coins = ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
         coins = args.coins or default_coins
