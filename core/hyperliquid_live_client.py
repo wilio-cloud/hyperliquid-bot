@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from eth_account import Account
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
