@@ -15,8 +15,11 @@ from rich.live import Live
 
 from config.settings import config
 from core.aevo_ws_client import AevoWSClient
+from core.arbitrage_live_exchange import ArbitrageLiveExchange
 from core.arbitrage_models import ArbitrageDirection, ArbitragePosition, ArbitrageSignal
 from core.arbitrage_paper_exchange import ArbitragePaperExchange
+from core.hyperliquid_live_client import HyperliquidLiveClient
+from core.aevo_live_client import AevoLiveClient
 from core.binance_ws_client import BinanceFuturesWSClient, get_ssl_context
 from core.dydx_ws_client import DydxV4WSClient
 from core.models import OrderBookL2, OrderSide, Signal, Trade
@@ -65,6 +68,7 @@ class ArbitrageTradingBotApp:
         min_size_usd: float = 100.0,
         max_size_usd: float = 2500.0,
         state_file: Optional[str] = None,
+        execution_mode: str = "paper",
     ):
         self.coins = coins
         self.venue2 = venue2.lower()
@@ -84,19 +88,71 @@ class ArbitrageTradingBotApp:
         self.min_size_usd = min_size_usd
         self.max_size_usd = max_size_usd
         self.start_time = time.time()
+        self.execution_mode = execution_mode.lower()
 
         initial_hl = initial_balance / 2.0
         initial_bn = initial_balance / 2.0
 
-        self.exchange = ArbitragePaperExchange(
-            initial_hl_balance=initial_hl,
-            initial_bn_balance=initial_bn,
-            venue2_name=self.venue2,
-            leverage=self.leverage,
-            on_open_cb=self._on_pair_open,
-            on_close_cb=self._on_pair_close,
-            state_file=state_file,
-        )
+        if self.execution_mode == "live":
+            wallet_address = os.getenv("WALLET_ADDRESS", "").strip()
+            hl_agent_key = os.getenv("HL_AGENT_PRIVATE_KEY", "").strip()
+            aevo_key = os.getenv("AEVO_API_KEY", "").strip()
+            aevo_secret = os.getenv("AEVO_API_SECRET", "").strip()
+            aevo_signing_key = os.getenv("AEVO_SIGNING_KEY", "").strip()
+            aevo_env = os.getenv("AEVO_ENV", "mainnet").strip()
+            hl_testnet = os.getenv("HL_TESTNET", "false").lower() == "true"
+
+            missing = []
+            if not wallet_address:
+                missing.append("WALLET_ADDRESS")
+            if not hl_agent_key:
+                missing.append("HL_AGENT_PRIVATE_KEY")
+            if not aevo_key:
+                missing.append("AEVO_API_KEY")
+            if not aevo_secret:
+                missing.append("AEVO_API_SECRET")
+            if not aevo_signing_key:
+                missing.append("AEVO_SIGNING_KEY")
+
+            if missing:
+                err_msg = f"Falten credencials per al mode LIVE: {', '.join(missing)}"
+                logger.error(err_msg)
+                raise ValueError(err_msg)
+
+            hl_client = HyperliquidLiveClient(
+                wallet_address=wallet_address,
+                agent_private_key=hl_agent_key,
+                testnet=hl_testnet,
+            )
+            aevo_client = AevoLiveClient(
+                wallet_address=wallet_address,
+                api_key=aevo_key,
+                api_secret=aevo_secret,
+                signing_key=aevo_signing_key,
+                env=aevo_env,
+            )
+            self.exchange = ArbitrageLiveExchange(
+                hl_client=hl_client,
+                aevo_client=aevo_client,
+                initial_hl_balance=initial_hl,
+                initial_bn_balance=initial_bn,
+                leverage=self.leverage,
+                on_open_cb=self._on_pair_open,
+                on_close_cb=self._on_pair_close,
+                state_file=state_file or "live_state.json",
+            )
+            logger.info("⚡ [MODE REAL ACTIVAT] ArbitrageLiveExchange inicialitzat amb connexió a Hyperliquid i Aevo.")
+        else:
+            self.exchange = ArbitragePaperExchange(
+                initial_hl_balance=initial_hl,
+                initial_bn_balance=initial_bn,
+                venue2_name=self.venue2,
+                leverage=self.leverage,
+                on_open_cb=self._on_pair_open,
+                on_close_cb=self._on_pair_close,
+                state_file=state_file,
+            )
+
         self.strategy = CrossExchangeArbitrageStrategy(
             min_entry_spread_pct=min_spread,
             weekend_min_spread_pct=weekend_min_spread,
@@ -136,6 +192,7 @@ class ArbitrageTradingBotApp:
         self.is_running = False
         self._sync_task: Optional[asyncio.Task] = None
         self._funding_accrual_task: Optional[asyncio.Task] = None
+        self._balance_sync_task: Optional[asyncio.Task] = None
 
     def calculate_order_size(self) -> float:
         """
@@ -528,8 +585,20 @@ class ArbitrageTradingBotApp:
             "equity_history": getattr(self.exchange, "equity_history", []),
         }
 
+    async def _run_balance_sync_loop(self):
+        """Sincronitza els saldos reals periòdicament cada 60s en mode LIVE."""
+        while self.is_running:
+            await asyncio.sleep(60.0)
+            if isinstance(self.exchange, ArbitrageLiveExchange):
+                await self.exchange.sync_real_balances()
+
     async def run(self, duration_sec: int = 0):
         self.is_running = True
+        if isinstance(self.exchange, ArbitrageLiveExchange):
+            logger.info("⚡ [MODE REAL] Verificant i sincronitzant saldos reals amb la blockchain...")
+            await self.exchange.sync_real_balances()
+            self._balance_sync_task = asyncio.create_task(self._run_balance_sync_loop())
+
         await self.hl_ws.start()
         await self.venue2_ws.start()
         await self.web_server.start()
@@ -557,7 +626,7 @@ class ArbitrageTradingBotApp:
 
     async def shutdown(self):
         self.is_running = False
-        for t in (self._sync_task, self._funding_accrual_task):
+        for t in (self._sync_task, self._funding_accrual_task, self._balance_sync_task):
             if t:
                 t.cancel()
         await self.web_server.stop()
@@ -733,9 +802,13 @@ def main():
     parser.add_argument("--max-book-spread", type=float, default=max_book_spread_default, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.350%%)")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
+    parser.add_argument("--live", action="store_true", help="Activar mode d'execució en real a Hyperliquid i Aevo")
+    parser.add_argument("--execution-mode", type=str, default=os.getenv("EXECUTION_MODE", "paper"), choices=["paper", "live"], help="Mode d'execució: 'paper' o 'live' (default: paper o via EXECUTION_MODE env)")
     parser.add_argument("--no-burst", action="store_true", help="Desactivar Volume Burst (només scalper)")
     parser.add_argument("--maker-only", action="store_true", help="Només maker (només scalper)")
     args = parser.parse_args()
+
+    execution_mode = "live" if (args.live or args.execution_mode == "live") else "paper"
 
     if args.mode == "arbitrage":
         if args.venue2 == "dydx":
@@ -745,6 +818,8 @@ def main():
         else:
             default_coins = ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
         coins = args.coins or default_coins
+        default_state_file = "live_state.json" if execution_mode == "live" else "paper_state.json"
+        state_file = os.getenv("STATE_FILE", default_state_file)
         app = ArbitrageTradingBotApp(
             coins=coins,
             venue2=args.venue2,
@@ -762,7 +837,8 @@ def main():
             size_pct=args.size_pct,
             min_size_usd=args.min_size,
             max_size_usd=args.max_size,
-            state_file=os.getenv("STATE_FILE", "paper_state.json"),
+            state_file=state_file,
+            execution_mode=execution_mode,
         )
     else:
         coins = args.coins or ["BTC"]
