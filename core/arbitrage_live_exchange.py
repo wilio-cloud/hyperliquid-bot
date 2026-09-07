@@ -108,18 +108,24 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         results = {"status": "ok", "leverage": lev, "hl": {}, "aevo": {}}
         coins = ["SOL", "HYPE", "NEAR", "PUMP", "SUI", "DOGE"]
         logger.info(f"⚡ [LEVERAGE] Aplicant {lev}x Cross Margin a Hyperliquid i Aevo per a {coins}...")
-        for coin in coins:
-            try:
-                hl_res = await self.hl_client.set_leverage(coin, leverage=lev, is_cross=True)
-                results["hl"][coin] = hl_res
-            except Exception as e:
-                results["hl"][coin] = {"status": "err", "error": str(e)}
 
+        async def _configure_coin(c):
             try:
-                aevo_res = await self.aevo_client.set_leverage(coin, leverage=lev)
-                results["aevo"][coin] = aevo_res
+                hl_res = await self.hl_client.set_leverage(c, leverage=lev, is_cross=True)
             except Exception as e:
-                results["aevo"][coin] = {"status": "err", "error": str(e)}
+                hl_res = {"status": "err", "error": str(e)}
+            try:
+                aevo_res = await self.aevo_client.set_leverage(c, leverage=lev)
+            except Exception as e:
+                aevo_res = {"status": "err", "error": str(e)}
+            return c, hl_res, aevo_res
+
+        outcomes = await asyncio.gather(*[_configure_coin(c) for c in coins], return_exceptions=True)
+        for out in outcomes:
+            if isinstance(out, tuple) and len(out) == 3:
+                c, hl_res, aevo_res = out
+                results["hl"][c] = hl_res
+                results["aevo"][c] = aevo_res
 
         self._configured_leverage_coins.update(coins)
         logger.info(f"⚡ [LEVERAGE] Resultats de configuració ({lev}x): {results}")

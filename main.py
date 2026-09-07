@@ -594,6 +594,9 @@ class ArbitrageTradingBotApp:
 
     async def run(self, duration_sec: int = 0):
         self.is_running = True
+        # Iniciar el servidor web immediatament per respondre a l'instant al healthcheck de Railway
+        await self.web_server.start()
+
         if isinstance(self.exchange, ArbitrageLiveExchange):
             logger.info("⚡ [MODE REAL] Verificant i sincronitzant saldos reals amb la blockchain...")
             await self.exchange.sync_real_balances()
@@ -606,7 +609,6 @@ class ArbitrageTradingBotApp:
 
         await self.hl_ws.start()
         await self.venue2_ws.start()
-        await self.web_server.start()
         self._sync_task = asyncio.create_task(self._run_hl_meta_sync_loop())
         self._funding_accrual_task = asyncio.create_task(self._run_hourly_funding_loop())
 
