@@ -300,7 +300,12 @@ class AevoLiveClient:
             async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self.ssl_context)) as session:
                 async with session.get(url, headers=self.headers, timeout=aiohttp.ClientTimeout(total=6.0)) as resp:
                     if resp.status == 200:
-                        return await resp.json()
+                        data = await resp.json()
+                        if isinstance(data, dict):
+                            return data.get("positions", [])
+                        elif isinstance(data, list):
+                            return data
+                        return []
                     return []
         except Exception as e:
             logger.error(f"Error obtenint posicions Aevo: {e}")
