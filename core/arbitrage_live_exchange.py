@@ -331,15 +331,15 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             hl_is_buy_to_close = (pos.leg_hl.side == OrderSide.SELL)
             aevo_is_buy_to_close = (pos.leg_bn.side == OrderSide.SELL)
 
-            # Tancament seqüencial: Primer tanquem Hyperliquid (Taker IOC)
+            # Tancament seqüencial: Primer tanquem Hyperliquid (Sempre Taker IOC per evitar ordres resting penjades)
             try:
                 hl_res = await self.hl_client.place_order(
                     coin=coin,
                     is_buy=hl_is_buy_to_close,
                     size=pos.leg_hl.size,
                     price=hl_exit_price,
-                    post_only=is_maker,
-                    ioc=not is_maker,
+                    post_only=False,
+                    ioc=True,
                 )
             except Exception as e:
                 hl_res = {"status": "err", "error": str(e)}
@@ -421,7 +421,12 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         """Tanca a mercat TOTS els contractes oberts a Hyperliquid i Aevo per deixar els comptes 100% plans."""
         results = {"hl_closed": [], "aevo_closed": []}
         try:
-            # 0. Cancel·lar qualsevol ordre oberta a Aevo per alliberar marge
+            # 0. Cancel·lar qualsevol ordre oberta a Hyperliquid i Aevo per alliberar marge
+            try:
+                await self.hl_client.cancel_all_orders()
+            except Exception as he:
+                logger.debug(f"Error cancel·lant ordres pendents Hyperliquid: {he}")
+
             try:
                 await self.aevo_client.cancel_all_orders()
             except Exception as ce:

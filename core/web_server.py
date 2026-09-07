@@ -995,6 +995,7 @@ class WebDashboardServer:
                 diag["aevo_orders"] = await self.exchange.aevo_client.get_open_orders()
             if hasattr(self.exchange, "hl_client"):
                 diag["hl_account"] = await self.exchange.hl_client.get_account_state()
+                diag["hl_orders"] = await self.exchange.hl_client.get_open_orders()
         except Exception as e:
             diag["error"] = str(e)
         return web.json_response(diag)

@@ -189,10 +189,16 @@ class HyperliquidLiveClient:
                     if isinstance(resp_data, dict) and resp_data.get("type") == "order":
                         statuses = resp_data.get("data", {}).get("statuses", [])
                         if statuses and isinstance(statuses[0], dict):
-                            if "error" in statuses[0]:
-                                err_msg = statuses[0]["error"]
+                            st0 = statuses[0]
+                            if "error" in st0:
+                                err_msg = st0["error"]
                                 logger.error(f"Hyperliquid ha rebutjat l'ordre per a {coin}: {err_msg}")
                                 return {"status": "err", "error": err_msg, "raw": res}
+                            elif "resting" in st0:
+                                logger.warning(f"Ordre Hyperliquid pendent al llibre (resting, no omplerta) per a {coin}: {st0}")
+                                return {"status": "resting", "oid": st0["resting"].get("oid"), "raw": res}
+                            elif "filled" in st0:
+                                return {"status": "ok", "filled": st0["filled"], "raw": res}
                 elif res.get("status") == "err":
                     logger.error(f"Hyperliquid ha retornat error: {res.get('response')}")
                     return res
@@ -264,3 +270,33 @@ class HyperliquidLiveClient:
         except Exception as e:
             logger.error(f"Error cancel_order Hyperliquid: {e}")
             return {"status": "err", "error": str(e)}
+
+    async def get_open_orders(self) -> List[Dict[str, Any]]:
+        """Consulta totes les ordres pendents a Hyperliquid."""
+        try:
+            return await asyncio.to_thread(self.info.frontend_open_orders, self.wallet_address)
+        except Exception as e:
+            logger.error(f"Error consultant ordres obertes Hyperliquid: {e}")
+            return []
+
+    async def cancel_all_orders(self, coin: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Cancel·la totes les ordres pendents a Hyperliquid."""
+        def _execute():
+            orders = self.info.frontend_open_orders(self.wallet_address)
+            res = []
+            for o in orders:
+                c = o.get("coin")
+                oid = o.get("oid")
+                if coin is None or (c and c.upper() == coin.upper()):
+                    try:
+                        r = self.exchange.cancel(name=c, oid=oid)
+                        res.append(r)
+                    except Exception as ce:
+                        logger.error(f"Error cancel·lant ordre Hyperliquid {oid} ({c}): {ce}")
+            return res
+
+        try:
+            return await asyncio.to_thread(_execute)
+        except Exception as e:
+            logger.error(f"Error cancel·lant ordres Hyperliquid: {e}")
+            return []
