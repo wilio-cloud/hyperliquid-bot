@@ -21,16 +21,18 @@ class ArbitragePaperExchange:
         initial_bn_balance: float = 500.0,
         venue2_name: str = "AEVO",
         leverage: float = 2.0,
-        hl_maker_fee: float = 0.00010,  # 0.010%
-        hl_taker_fee: float = 0.00035,  # 0.035%
+        hl_maker_fee: float = 0.00015,  # 0.015% (Tier 0 base Hyperliquid)
+        hl_taker_fee: float = 0.00045,  # 0.045%
         bn_maker_fee: Optional[float] = None,
         bn_taker_fee: Optional[float] = None,
+        maker_first: bool = False,
         on_open_cb: Optional[Callable[[ArbitragePosition], None]] = None,
         on_close_cb: Optional[Callable[[ArbitragePosition, str, float], None]] = None,
         state_file: Optional[str] = None,
     ):
         self.venue2_name = venue2_name.upper()
         self.leverage = leverage
+        self.maker_first = maker_first
         self.initial_hl_balance = initial_hl_balance
         self.initial_bn_balance = initial_bn_balance
         self.initial_total_balance = initial_hl_balance + initial_bn_balance
@@ -43,21 +45,25 @@ class ArbitragePaperExchange:
 
         if bn_maker_fee is not None:
             self.bn_maker_fee = bn_maker_fee
+        elif self.venue2_name == "VERTEX":
+            self.bn_maker_fee = 0.00000  # 0.000% Maker a Vertex Protocol
         elif self.venue2_name == "AEVO":
-            self.bn_maker_fee = 0.00000  # 0.00% maker a Aevo
+            self.bn_maker_fee = 0.00030  # 0.030% Maker a Aevo
         elif self.venue2_name == "DYDX":
-            self.bn_maker_fee = 0.00020  # 0.020%
+            self.bn_maker_fee = 0.00010  # 0.010% Maker a dYdX v4
         else:
-            self.bn_maker_fee = 0.00020  # Binance
+            self.bn_maker_fee = 0.00020  # 0.020% Binance
 
         if bn_taker_fee is not None:
             self.bn_taker_fee = bn_taker_fee
+        elif self.venue2_name == "VERTEX":
+            self.bn_taker_fee = 0.00020  # 0.020% Taker a Vertex Protocol
         elif self.venue2_name == "AEVO":
-            self.bn_taker_fee = 0.00025  # 0.025% taker a Aevo
+            self.bn_taker_fee = 0.00050  # 0.050% Taker real a Aevo
         elif self.venue2_name == "DYDX":
-            self.bn_taker_fee = 0.00040  # 0.040%
+            self.bn_taker_fee = 0.00050  # 0.050% Taker estàndard Tier 1 a dYdX v4 (<1M$ volum)
         else:
-            self.bn_taker_fee = 0.00040  # Binance
+            self.bn_taker_fee = 0.00040  # 0.040% Binance
 
         self.on_open_cb = on_open_cb
         self.on_close_cb = on_close_cb
@@ -92,10 +98,11 @@ class ArbitragePaperExchange:
     def open_arbitrage_position(
         self,
         signal: ArbitrageSignal,
-        size_usd: float = 1000.0,
+        size_usd: float = 250.0,
         is_maker: bool = False,
+        maker_first: Optional[bool] = None,
     ) -> Optional[ArbitragePosition]:
-        """Obre simultàniament les dues potes d'arbitratge delta-neutral."""
+        """Simula l'obertura simultània (o Maker-First) de les dues potes d'arbitratge."""
         if self.has_open_position(signal.coin):
             logger.debug(f"Ja hi ha una posició oberta per {signal.coin}. Omissió.")
             return None
@@ -110,8 +117,17 @@ class ArbitragePaperExchange:
             return None
 
         pair_id = f"arb_{signal.coin}_{int(time.time() * 1000)}"
-        hl_fee_rate = self.hl_maker_fee if is_maker else self.hl_taker_fee
-        bn_fee_rate = self.bn_maker_fee if is_maker else self.bn_taker_fee
+        effective_maker_first = self.maker_first if maker_first is None else maker_first
+        if is_maker:
+            hl_fee_rate = self.hl_maker_fee
+            bn_fee_rate = self.bn_maker_fee
+        elif effective_maker_first:
+            # En mode Maker-First, Hyperliquid entra com a Maker passiu (0.015% o 0%) i Venue2 cobreix com a Taker
+            hl_fee_rate = self.hl_maker_fee
+            bn_fee_rate = self.bn_taker_fee
+        else:
+            hl_fee_rate = self.hl_taker_fee
+            bn_fee_rate = self.bn_taker_fee
 
         hl_size = size_usd / signal.hl_price
         bn_size = size_usd / signal.bn_price
@@ -446,4 +462,6 @@ class ArbitragePaperExchange:
             "profit_factor": profit_factor,
             "active_positions_count": len(self.active_positions),
             "equity_history": self.equity_history,
+            "execution_mode": "paper",
+            "maker_first": getattr(self, "maker_first", False),
         }

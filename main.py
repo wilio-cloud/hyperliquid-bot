@@ -20,8 +20,10 @@ from core.arbitrage_models import ArbitrageDirection, ArbitragePosition, Arbitra
 from core.arbitrage_paper_exchange import ArbitragePaperExchange
 from core.hyperliquid_live_client import HyperliquidLiveClient
 from core.aevo_live_client import AevoLiveClient
+from core.dydx_live_client import DydxLiveClient
 from core.binance_ws_client import BinanceFuturesWSClient, get_ssl_context
 from core.dydx_ws_client import DydxV4WSClient
+from core.vertex_ws_client import VertexWSClient
 from core.models import OrderBookL2, OrderSide, Signal, Trade
 from core.paper_exchange import PaperExchange
 from core.risk_manager import RiskManager
@@ -69,13 +71,19 @@ class ArbitrageTradingBotApp:
         max_size_usd: float = 2500.0,
         state_file: Optional[str] = None,
         execution_mode: str = "paper",
+        maker_first: bool = False,
+        port: int = 8080,
     ):
         self.coins = coins
+        self.port = port
         self.venue2 = venue2.lower()
+        self.maker_first = maker_first
         if self.venue2 == "aevo":
             self.venue2_label = "Aevo DEX"
         elif self.venue2 == "dydx":
             self.venue2_label = "dYdX v4"
+        elif self.venue2 == "vertex":
+            self.venue2_label = "Vertex Protocol (0% Maker)"
         else:
             self.venue2_label = "Binance"
 
@@ -96,10 +104,7 @@ class ArbitrageTradingBotApp:
         if self.execution_mode == "live":
             wallet_address = os.getenv("WALLET_ADDRESS", "").strip()
             hl_agent_key = os.getenv("HL_AGENT_PRIVATE_KEY", "").strip()
-            aevo_key = os.getenv("AEVO_API_KEY", "").strip()
-            aevo_secret = os.getenv("AEVO_API_SECRET", "").strip()
-            aevo_signing_key = os.getenv("AEVO_SIGNING_KEY", "").strip()
-            aevo_env = os.getenv("AEVO_ENV", "mainnet").strip()
+            hl_ref_code = os.getenv("HL_REFERRAL_CODE", config.hl_referral_code).strip()
             hl_testnet = os.getenv("HL_TESTNET", "false").lower() == "true"
 
             missing = []
@@ -107,47 +112,87 @@ class ArbitrageTradingBotApp:
                 missing.append("WALLET_ADDRESS")
             if not hl_agent_key:
                 missing.append("HL_AGENT_PRIVATE_KEY")
-            if not aevo_key:
-                missing.append("AEVO_API_KEY")
-            if not aevo_secret:
-                missing.append("AEVO_API_SECRET")
-            if not aevo_signing_key:
-                missing.append("AEVO_SIGNING_KEY")
 
-            if missing:
-                err_msg = f"Falten credencials per al mode LIVE: {', '.join(missing)}"
-                logger.error(err_msg)
-                raise ValueError(err_msg)
+            venue2_client = None
+            v2 = self.venue2.lower()
+
+            if v2 == "dydx":
+                dydx_address = os.getenv("DYDX_ADDRESS", "").strip()
+                dydx_mnemonic = os.getenv("DYDX_MNEMONIC", "").strip()
+                dydx_private_key = (os.getenv("DYDX_PRIVATE_KEY") or os.getenv("DYDX_PRIVATE") or "").strip()
+                dydx_node_url = os.getenv("DYDX_NODE_URL", "dydx-grpc.publicnode.com:443").strip()
+                dydx_env = os.getenv("DYDX_ENV", "mainnet").strip()
+
+                if not (dydx_mnemonic or dydx_private_key):
+                    missing.append("DYDX_MNEMONIC (o DYDX_PRIVATE_KEY)")
+
+                if missing:
+                    err_msg = f"Falten credencials per al mode LIVE amb dYdX: {', '.join(missing)}"
+                    logger.error(err_msg)
+                    raise ValueError(err_msg)
+
+                venue2_client = DydxLiveClient(
+                    address=dydx_address or None,
+                    mnemonic=dydx_mnemonic or None,
+                    private_key=dydx_private_key or None,
+                    node_url=dydx_node_url,
+                    env=dydx_env,
+                )
+            else:
+                aevo_key = os.getenv("AEVO_API_KEY", "").strip()
+                aevo_secret = os.getenv("AEVO_API_SECRET", "").strip()
+                aevo_signing_key = os.getenv("AEVO_SIGNING_KEY", "").strip()
+                aevo_env = os.getenv("AEVO_ENV", "mainnet").strip()
+
+                if not aevo_key:
+                    missing.append("AEVO_API_KEY")
+                if not aevo_secret:
+                    missing.append("AEVO_API_SECRET")
+                if not aevo_signing_key:
+                    missing.append("AEVO_SIGNING_KEY")
+
+                if missing:
+                    err_msg = f"Falten credencials per al mode LIVE amb Aevo: {', '.join(missing)}"
+                    logger.error(err_msg)
+                    raise ValueError(err_msg)
+
+                venue2_client = AevoLiveClient(
+                    wallet_address=wallet_address,
+                    api_key=aevo_key,
+                    api_secret=aevo_secret,
+                    signing_key=aevo_signing_key,
+                    env=aevo_env,
+                )
 
             hl_client = HyperliquidLiveClient(
                 wallet_address=wallet_address,
                 agent_private_key=hl_agent_key,
                 testnet=hl_testnet,
-            )
-            aevo_client = AevoLiveClient(
-                wallet_address=wallet_address,
-                api_key=aevo_key,
-                api_secret=aevo_secret,
-                signing_key=aevo_signing_key,
-                env=aevo_env,
+                referral_code=hl_ref_code or None,
             )
             self.exchange = ArbitrageLiveExchange(
                 hl_client=hl_client,
-                aevo_client=aevo_client,
+                venue2_client=venue2_client,
+                venue2_name=self.venue2.upper(),
                 initial_hl_balance=initial_hl,
                 initial_bn_balance=initial_bn,
                 leverage=self.leverage,
+                maker_first=self.maker_first,
                 on_open_cb=self._on_pair_open,
                 on_close_cb=self._on_pair_close,
                 state_file=state_file or "live_state.json",
             )
-            logger.info("⚡ [MODE REAL ACTIVAT] ArbitrageLiveExchange inicialitzat amb connexió a Hyperliquid i Aevo.")
+            logger.info(
+                f"⚡ [MODE REAL ACTIVAT] ArbitrageLiveExchange inicialitzat "
+                f"(Hyperliquid + {self.venue2_label}, MakerFirst={self.maker_first})."
+            )
         else:
             self.exchange = ArbitragePaperExchange(
                 initial_hl_balance=initial_hl,
                 initial_bn_balance=initial_bn,
                 venue2_name=self.venue2,
                 leverage=self.leverage,
+                maker_first=self.maker_first,
                 on_open_cb=self._on_pair_open,
                 on_close_cb=self._on_pair_close,
                 state_file=state_file,
@@ -159,6 +204,7 @@ class ArbitrageTradingBotApp:
             min_profit_usd=min_profit_usd,
             target_exit_spread_pct=exit_spread,
             max_book_spread_pct=max_book_spread,
+            maker_first=self.maker_first,
         )
         self.hl_ws = HyperliquidWSClient(
             coins=self.coins,
@@ -176,6 +222,12 @@ class ArbitrageTradingBotApp:
                 on_book_update=self.handle_venue2_book,
                 on_funding_update=self.handle_venue2_funding,
             )
+        elif self.venue2 == "vertex":
+            self.venue2_ws = VertexWSClient(
+                coins=self.coins,
+                on_book_update=self.handle_venue2_book,
+                on_funding_update=self.handle_venue2_funding,
+            )
         else:
             self.venue2_ws = BinanceFuturesWSClient(
                 coins=self.coins,
@@ -186,6 +238,7 @@ class ArbitrageTradingBotApp:
         self.web_server = WebDashboardServer(
             exchange=self.exchange,
             start_time=self.start_time,
+            port=self.port,
             app_ref=self,
         )
         self.coin_cooldowns: Dict[str, float] = {}
@@ -390,6 +443,8 @@ class ArbitrageTradingBotApp:
             for p in self.exchange.closed_positions[-35:]
         ]
         metrics = self.exchange.metrics.copy()
+        metrics["execution_mode"] = self.execution_mode
+        metrics["maker_first"] = self.maker_first
         current_size = self.calculate_order_size()
         metrics["dynamic_size"] = self.dynamic_size
         metrics["current_order_size"] = current_size
@@ -401,7 +456,13 @@ class ArbitrageTradingBotApp:
         metrics["min_spread"] = eff_spread
         metrics["weekday_min_spread"] = self.strategy.min_entry_spread_pct
         metrics["weekend_min_spread"] = self.strategy.weekend_min_spread_pct
-        metrics["regime_label"] = f"🗓️ CAP DE SETMANA ({eff_spread:.3f}%)" if is_wk else f"💎 RENDIBILITAT REAL ({eff_spread:.3f}%)"
+        if self.maker_first:
+            reg_label = f"⚡ MAKER-FIRST ({eff_spread:.3f}%)"
+        elif is_wk:
+            reg_label = f"🗓️ CAP DE SETMANA ({eff_spread:.3f}%)"
+        else:
+            reg_label = f"💎 RENDIBILITAT REAL ({eff_spread:.3f}%)"
+        metrics["regime_label"] = reg_label
         metrics["max_book_spread"] = self.strategy.max_book_spread_pct
 
         # Càlcul del ritme horari global i mètriques detallades per actiu (Coin Analytics)
@@ -600,7 +661,7 @@ class ArbitrageTradingBotApp:
         if isinstance(self.exchange, ArbitrageLiveExchange):
             logger.info("⚡ [MODE REAL] Verificant i sincronitzant saldos reals amb la blockchain...")
             await self.exchange.sync_real_balances()
-            logger.info("⚡ [MODE REAL] Configurant palanquejament a 2x a Hyperliquid i Aevo...")
+            logger.info(f"⚡ [MODE REAL] Configurant palanquejament a {int(self.leverage)}x a Hyperliquid i {self.venue2_label}...")
             try:
                 await self.exchange.configure_all_leverage()
             except Exception as e:
@@ -789,10 +850,11 @@ def main():
     min_size_default = float(os.environ.get("MIN_SIZE", "100.0"))
     max_size_default = float(os.environ.get("MAX_SIZE", "2500.0"))
 
-    parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + Aevo / dYdX / Binance)")
+    parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + Aevo / Vertex / dYdX / Binance)")
     parser.add_argument("--mode", choices=["arbitrage", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (recomanat) o 'scalper'")
-    parser.add_argument("--venue2", choices=["aevo", "dydx", "binance"], default=venue2_default, help="Segon exchange per a l'arbitratge: 'aevo' (100%% DEX d'alta freqüència i liquiditat d'altcoins), 'dydx' o 'binance'")
+    parser.add_argument("--venue2", choices=["aevo", "vertex", "dydx", "binance"], default=venue2_default, help="Segon exchange per a l'arbitratge: 'aevo' (DEX d'alta freqüència), 'vertex' (0%% Maker Fee), 'dydx' o 'binance'")
     parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL)")
+    parser.add_argument("--maker-first", action="store_true", default=os.getenv("MAKER_FIRST", "false").lower() in ("true", "1", "yes"), help="Activar execució Maker-First a Hyperliquid per minimitzar comissions d'arbitratge")
     parser.add_argument("--initial-balance", type=float, default=initial_balance_default, help="Capital inicial total en dòlars (default: 1000.0$)")
     parser.add_argument("--leverage", type=float, default=leverage_default, help="Apalancament conservador per a l'arbitratge (default: 2.0x)")
     parser.add_argument("--size", type=float, default=size_default, help="Mida en dòlars per ordre/pota (default: 250.0$)")
@@ -813,18 +875,29 @@ def main():
     parser.add_argument("--execution-mode", type=str, default=os.getenv("EXECUTION_MODE", "paper"), choices=["paper", "live"], help="Mode d'execució: 'paper' o 'live' (default: paper o via EXECUTION_MODE env)")
     parser.add_argument("--no-burst", action="store_true", help="Desactivar Volume Burst (només scalper)")
     parser.add_argument("--maker-only", action="store_true", help="Només maker (només scalper)")
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", 8080)), help="Port del servidor web dashboard (default: 8080)")
     args = parser.parse_args()
 
     execution_mode = "live" if (args.live or args.execution_mode == "live") else "paper"
 
     if args.mode == "arbitrage":
-        if args.venue2 == "dydx":
-            default_coins = ["BTC", "ETH", "SOL"]
+        env_coins = os.getenv("COINS")
+        if args.coins:
+            coins = args.coins
+        elif env_coins:
+            coins = [c.strip().upper() for c in env_coins.split(",") if c.strip()]
+        elif args.venue2 == "dydx":
+            default_coins = ["SOL", "SUI", "NEAR", "ZEC", "DOGE", "LINK", "WIF"]
+            coins = default_coins
+        elif args.venue2 == "vertex":
+            default_coins = ["BTC", "ETH", "SOL", "ARB", "SUI", "LINK", "AVAX"]
+            coins = default_coins
         elif args.venue2 == "aevo":
             default_coins = ["SOL", "HYPE", "NEAR", "PUMP", "SUI", "ZEC"]
+            coins = default_coins
         else:
             default_coins = ["BTC", "ETH", "SOL", "LINK", "NEAR", "SUI", "DOGE"]
-        coins = args.coins or default_coins
+            coins = default_coins
         default_state_file = "live_state.json" if execution_mode == "live" else "paper_state.json"
         state_file = os.getenv("STATE_FILE", default_state_file)
         app = ArbitrageTradingBotApp(
@@ -846,6 +919,8 @@ def main():
             max_size_usd=args.max_size,
             state_file=state_file,
             execution_mode=execution_mode,
+            maker_first=args.maker_first,
+            port=args.port,
         )
     else:
         coins = args.coins or ["BTC"]

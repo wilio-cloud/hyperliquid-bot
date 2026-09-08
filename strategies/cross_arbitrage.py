@@ -30,8 +30,10 @@ class CrossExchangeArbitrageStrategy:
         max_hold_seconds: int = 86400,         # 24 hores màxim (mai forcem sortida en pèrdua per temps)
         max_book_spread_pct: float = 0.220,    # Llindar màxim d'spread intern (filtre de llibres buits o il·líquids)
         per_coin_min_spread: Optional[Dict[str, float]] = None, # Llindars personalitzats per actiu
+        maker_first: bool = False,             # Execució Maker-First (reducció de fees per obrir a llindars menors)
     ):
         self.name = "CROSS_ARBITRAGE"
+        self.maker_first = maker_first
         self.min_entry_spread_pct = min_entry_spread_pct
         self.weekend_min_spread_pct = weekend_min_spread_pct
         self.auto_weekend_adjust = auto_weekend_adjust
@@ -64,6 +66,7 @@ class CrossExchangeArbitrageStrategy:
             "TIA": 0.260,
             "INJ": 0.260,
             "ZEC": 0.250,
+            "WIF": 0.250,
         }
 
         self.hl_books: Dict[str, OrderBookL2] = {}
@@ -90,7 +93,9 @@ class CrossExchangeArbitrageStrategy:
 
     @property
     def effective_min_spread(self) -> float:
-        """Retorna el llindar base general: 0.100% en cap de setmana, 0.120% entre setmana."""
+        """Retorna el llindar base general tenint en compte Maker-First i el règim de cap de setmana."""
+        if self.maker_first:
+            return 0.110
         if self.auto_weekend_adjust and self.is_weekend_regime:
             return self.weekend_min_spread_pct
         return self.min_entry_spread_pct
@@ -98,16 +103,23 @@ class CrossExchangeArbitrageStrategy:
     def get_effective_min_spread(self, coin: Optional[str] = None) -> float:
         """
         Retorna el llindar efectiu específic per a cada actiu.
-        Permet que ETH i SOL entrin a partir de 0.095% sense esperar deslligaments de 0.120%.
+        En mode Maker-First, les comissions round-trip es redueixen substancialment,
+        permetent capturar oportunitats a partir de 0.090% - 0.110%.
         """
         base = self.effective_min_spread
+        if self.maker_first:
+            base = min(base, 0.110)
+
         if not coin:
             return base
+
         c_upper = coin.upper()
         if c_upper in self.per_coin_min_spread:
             custom_spread = self.per_coin_min_spread[c_upper]
-            if self.auto_weekend_adjust and self.is_weekend_regime:
-                return min(custom_spread, self.weekend_min_spread_pct)
+            if self.maker_first:
+                custom_spread = min(custom_spread * 0.45, 0.110)
+            elif self.auto_weekend_adjust and self.is_weekend_regime:
+                custom_spread = min(custom_spread, self.weekend_min_spread_pct)
             return custom_spread
         return base
 

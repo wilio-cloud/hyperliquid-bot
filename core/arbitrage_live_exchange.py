@@ -16,29 +16,46 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
     def __init__(
         self,
         hl_client: HyperliquidLiveClient,
-        aevo_client: AevoLiveClient,
+        venue2_client: Optional[Any] = None,
+        aevo_client: Optional[Any] = None,
+        venue2_name: str = "AEVO",
         initial_hl_balance: float = 500.0,
         initial_bn_balance: float = 500.0,
         leverage: float = 2.0,
+        maker_first: bool = False,
         on_open_cb: Optional[Callable[[ArbitragePosition], None]] = None,
         on_close_cb: Optional[Callable[[ArbitragePosition, str, float], None]] = None,
         state_file: str = "live_state.json",
     ):
+        client2 = venue2_client or aevo_client
+        if client2 is None:
+            raise ValueError("Cal especificar venue2_client o aevo_client per a ArbitrageLiveExchange.")
+
+        v2_name = venue2_name.upper()
+        if v2_name == "DYDX":
+            bn_maker_fee = 0.00010
+            bn_taker_fee = 0.00050
+        else:
+            bn_maker_fee = 0.00030
+            bn_taker_fee = 0.00050
+
         super().__init__(
             initial_hl_balance=initial_hl_balance,
             initial_bn_balance=initial_bn_balance,
-            venue2_name="AEVO",
+            venue2_name=v2_name,
             leverage=leverage,
-            hl_maker_fee=0.00010,
-            hl_taker_fee=0.00035,
-            bn_maker_fee=0.00000,
-            bn_taker_fee=0.00050,
+            hl_maker_fee=0.00015,
+            hl_taker_fee=0.00045,
+            bn_maker_fee=bn_maker_fee,
+            bn_taker_fee=bn_taker_fee,
+            maker_first=maker_first,
             on_open_cb=on_open_cb,
             on_close_cb=on_close_cb,
             state_file=state_file,
         )
         self.hl_client = hl_client
-        self.aevo_client = aevo_client
+        self.venue2_client = client2
+        self.aevo_client = client2
         self._pending_opens: set = set()
         self._pending_closes: set = set()
         self._open_broker_coins: set = set()
@@ -225,6 +242,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         signal: ArbitrageSignal,
         size_usd: float = 250.0,
         is_maker: bool = False,
+        maker_first: Optional[bool] = None,
     ) -> Optional[ArbitragePosition]:
         """Inicia l'execució atòmica d'obertura en segon pla."""
         if self.has_open_position(signal.coin) or signal.coin in self._pending_opens:
@@ -240,8 +258,9 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             )
             return None
 
+        effective_maker_first = self.maker_first if maker_first is None else maker_first
         self._pending_opens.add(signal.coin)
-        asyncio.create_task(self._execute_live_open(signal, size_usd, is_maker))
+        asyncio.create_task(self._execute_live_open(signal, size_usd, is_maker, effective_maker_first))
         return None
 
     async def _execute_live_open(
@@ -249,6 +268,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         signal: ArbitrageSignal,
         size_usd: float,
         is_maker: bool,
+        effective_maker_first: bool = False,
     ):
         coin = signal.coin
         pair_id = f"ARB_{coin}_LIVE_{int(time.time() * 1000)}"
@@ -276,7 +296,8 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             logger.info(
                 f"🚀 [EXECUCIÓ REAL ENVIANT] {coin} {signal.direction.value} | "
                 f"HL: {'BUY' if hl_is_buy else 'SELL'} {hl_sz} @ {signal.hl_price} | "
-                f"Aevo: {'BUY' if aevo_is_buy else 'SELL'} {aevo_sz} @ {signal.bn_price}"
+                f"Aevo: {'BUY' if aevo_is_buy else 'SELL'} {aevo_sz} @ {signal.bn_price} | "
+                f"Mode={'MAKER_FIRST' if effective_maker_first else ('MAKER' if is_maker else 'TAKER_IOC')}"
             )
 
             # Pre-flight check: assegurar que el spread d'execució actual del llibre encara supera el llindar mínim
@@ -290,7 +311,8 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                     else:
                         curr_exec_spread = ((bn_book.best_bid - hl_book.best_ask) / mid) * 100.0
                     
-                    min_allowed = 0.200  # Hurdle rate mínim absolut abans d'enviar ordres a la blockchain
+                    # Amb Maker-First el hurdle rate pot ser de 0.09% en comptes de 0.20%
+                    min_allowed = 0.080 if effective_maker_first else 0.200
                     if curr_exec_spread < min_allowed:
                         logger.warning(
                             f"⚠️ [PRE-FLIGHT REBUTJAT] Spread per a {coin} s'ha reduït a {curr_exec_spread:.3f}% "
@@ -298,32 +320,61 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                         )
                         return
 
-            # 2. PAS A: Enviament de la pota primària (Hyperliquid Taker IOC)
-            logger.info(f"Enviant pota primària a Hyperliquid per a {coin}...")
+            # 2. PAS A: Enviament de la pota primària (Hyperliquid Alo si Maker-First, o IOC si Taker)
+            use_post_only = is_maker or effective_maker_first
+            logger.info(f"Enviant pota primària a Hyperliquid per a {coin} (PostOnly={use_post_only})...")
             try:
                 hl_res = await self.hl_client.place_order(
                     coin=coin,
                     is_buy=hl_is_buy,
                     size=hl_sz,
                     price=signal.hl_price,
-                    post_only=is_maker,
-                    ioc=not is_maker,
+                    post_only=use_post_only,
+                    ioc=not use_post_only,
                 )
             except Exception as e:
                 hl_res = {"status": "err", "error": str(e)}
 
-            hl_ok = isinstance(hl_res, dict) and hl_res.get("status") == "ok"
+            hl_ok = False
+            hl_fill_type = "TAKER"
+            if isinstance(hl_res, dict):
+                if hl_res.get("status") == "ok":
+                    hl_ok = True
+                    hl_fill_type = "MAKER" if use_post_only else "TAKER"
+                elif hl_res.get("status") == "resting":
+                    # L'ordre Maker està al llibre. Esperem fins a 3 segons que s'ompli passivament
+                    oid = hl_res.get("oid")
+                    logger.info(f"Ordre Maker {coin} descansant al llibre (OID {oid}). Esperant execució passiva (3s max)...")
+                    for _ in range(6):
+                        await asyncio.sleep(0.5)
+                        try:
+                            st = await self.hl_client.get_account_state()
+                            for p in st.get("assetPositions", []):
+                                pos = p.get("position", {})
+                                if pos.get("coin", "").upper() == coin and abs(float(pos.get("szi", 0.0))) > 0:
+                                    hl_ok = True
+                                    hl_fill_type = "MAKER"
+                                    logger.info(f"✅ Ordre Maker {coin} omplerta passivament al llibre! (0.015% Maker fee)")
+                                    break
+                        except Exception:
+                            pass
+                        if hl_ok:
+                            break
+
+                    if not hl_ok and oid:
+                        logger.info(f"Timeout ordre Maker {coin}. Cancel·lant OID {oid} a cost 0$ gas...")
+                        await self.hl_client.cancel_order(coin, oid)
 
             # Si Hyperliquid no s'omple o falla, avortem immediatament sense tocar Aevo (0 risc, 0 exposició)
             if not hl_ok:
                 logger.warning(
                     f"⚠️ [EXECUCIÓ AVORTADA] Pota Hyperliquid no omplerta per {coin} ({hl_res}). "
-                    f"Cancel·lant sense obrir a Aevo (0 exposició direccional)."
+                    f"Cancel·lant sense obrir a Aevo (0 exposició direccional, 0 comissió pagada)."
                 )
                 return
 
             # 3. PAS B: Hyperliquid omplert! Enviament immediat de cobertura a Aevo
-            logger.info(f"Pota Hyperliquid omplerta per a {coin}. Enviant cobertura immediata a Aevo...")
+            logger.info(f"Pota Hyperliquid omplerta ({hl_fill_type}) per a {coin}. Enviant cobertura immediata a Aevo...")
             try:
                 aevo_res = await self.aevo_client.place_order(
                     coin=coin,
@@ -340,7 +391,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
             # 4. CAS 1: Ambdues han tingut èxit -> Posició delta-neutral assegurada!
             if aevo_ok:
-                hl_fee_rate = self.hl_maker_fee if is_maker else self.hl_taker_fee
+                hl_fee_rate = self.hl_maker_fee if hl_fill_type == "MAKER" else self.hl_taker_fee
                 bn_fee_rate = self.bn_maker_fee if is_maker else self.bn_taker_fee
 
                 hl_entry_fee = size_usd * hl_fee_rate
@@ -359,7 +410,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                     fees_paid=hl_entry_fee,
                 )
                 leg_bn = ArbitrageLeg(
-                    venue="AEVO",
+                    venue=self.venue2_name,
                     coin=coin,
                     side=OrderSide.BUY if aevo_is_buy else OrderSide.SELL,
                     entry_price=signal.bn_price,
@@ -548,18 +599,19 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
     async def close_all_live_positions(self) -> Dict[str, Any]:
         """Tanca a mercat TOTS els contractes oberts a Hyperliquid i Aevo per deixar els comptes 100% plans."""
-        results = {"hl_closed": [], "aevo_closed": []}
+        v2_key = f"{self.venue2_name.lower()}_closed"
+        results = {"hl_closed": [], "aevo_closed": [], v2_key: []}
         try:
-            # 0. Cancel·lar qualsevol ordre oberta a Hyperliquid i Aevo per alliberar marge
+            # 0. Cancel·lar qualsevol ordre oberta a Hyperliquid i Venue2 per alliberar marge
             try:
                 await self.hl_client.cancel_all_orders()
             except Exception as he:
                 logger.debug(f"Error cancel·lant ordres pendents Hyperliquid: {he}")
 
             try:
-                await self.aevo_client.cancel_all_orders()
+                await self.venue2_client.cancel_all_orders()
             except Exception as ce:
-                logger.debug(f"Error cancel·lant ordres pendents Aevo: {ce}")
+                logger.debug(f"Error cancel·lant ordres pendents {self.venue2_name}: {ce}")
 
             # 1. Tancar Hyperliquid
             hl_state = await self.hl_client.get_account_state()
@@ -573,16 +625,19 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                         res = await self.hl_client.market_close(coin=coin, size=abs(szi))
                         results["hl_closed"].append({"coin": coin, "size": abs(szi), "res": res})
 
-            # 2. Tancar Aevo
-            aevo_positions = await self.aevo_client.get_positions()
-            if isinstance(aevo_positions, list):
-                for p in aevo_positions:
+            # 2. Tancar Venue 2 (Aevo / dYdX)
+            v2_positions = await self.venue2_client.get_positions()
+            if isinstance(v2_positions, list):
+                for p in v2_positions:
                     coin = p.get("asset")
                     amount = float(p.get("amount", 0.0))
                     if amount > 0.0 and coin:
-                        logger.info(f"Tancant posició restant a Aevo: {coin} (amount={amount})")
-                        res = await self.aevo_client.market_close(coin=coin, size=amount)
-                        results["aevo_closed"].append({"coin": coin, "size": amount, "res": res})
+                        logger.info(f"Tancant posició restant a {self.venue2_name}: {coin} (amount={amount})")
+                        res = await self.venue2_client.market_close(coin=coin, size=amount)
+                        closed_item = {"coin": coin, "size": amount, "res": res}
+                        results["aevo_closed"].append(closed_item)
+                        if v2_key != "aevo_closed":
+                            results[v2_key].append(closed_item)
 
             self.active_positions.clear()
             self._open_broker_coins.clear()
@@ -594,3 +649,9 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             results["status"] = "err"
             results["error"] = str(e)
         return results
+
+    @property
+    def metrics(self) -> dict:
+        m = super().metrics
+        m["execution_mode"] = "live"
+        return m

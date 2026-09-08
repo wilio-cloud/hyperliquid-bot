@@ -33,10 +33,12 @@ class HyperliquidLiveClient:
         wallet_address: str,
         agent_private_key: str,
         testnet: bool = False,
+        referral_code: Optional[str] = None,
     ):
         self.wallet_address = wallet_address.lower()
         self.agent_private_key = agent_private_key
         self.testnet = testnet
+        self.referral_code = referral_code
         self.base_url = constants.TESTNET_API_URL if testnet else constants.MAINNET_API_URL
 
         # Creació del compte de signatura de l'Agent
@@ -69,6 +71,39 @@ class HyperliquidLiveClient:
             f"HyperliquidLiveClient inicialitzat per a wallet {self.wallet_address[:8]}... "
             f"mitjançant Agent {self.agent_account.address[:8]}... (Testnet={self.testnet})"
         )
+
+    async def get_referral_state(self) -> Dict[str, Any]:
+        """Consulta l'estat de referits del compte a Hyperliquid."""
+        try:
+            return await asyncio.to_thread(self.info.query_referral_state, self.wallet_address)
+        except Exception as e:
+            logger.debug(f"No s'ha pogut consultar referral_state a Hyperliquid: {e}")
+            return {}
+
+    async def apply_referral_code(self, code: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Aplica un codi de referit a Hyperliquid per obtenir el descompte del -4% en comissions.
+        Només s'aplica si el compte no té cap referent registrat prèviament.
+        """
+        target_code = (code or self.referral_code or "").strip()
+        if not target_code:
+            return {"status": "skipped", "reason": "empty_code"}
+
+        try:
+            state = await self.get_referral_state()
+            referred_by = state.get("referredBy")
+            if referred_by:
+                existing_code = referred_by.get("code") if isinstance(referred_by, dict) else str(referred_by)
+                logger.info(f"El compte ja té un codi de referit actiu a Hyperliquid: '{existing_code}' (-4% vigent).")
+                return {"status": "ok", "already_set": True, "code": existing_code}
+
+            logger.info(f"Registrant codi de referit '{target_code}' a Hyperliquid per al descompte del -4%...")
+            res = await asyncio.to_thread(self.exchange.set_referrer, target_code)
+            logger.info(f"Codi de referit aplicat correctament a Hyperliquid: {res}")
+            return res if isinstance(res, dict) else {"status": "ok", "raw": res}
+        except Exception as e:
+            logger.warning(f"No s'ha pogut aplicar el codi de referit '{target_code}' a Hyperliquid: {e}")
+            return {"status": "err", "error": str(e)}
 
     def round_size(self, coin: str, size: float) -> float:
         """Ajusta la mida al nombre màxim de decimals admès per Hyperliquid."""

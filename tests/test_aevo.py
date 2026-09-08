@@ -67,8 +67,8 @@ def test_aevo_paper_exchange_fees():
         leverage=2.0,
     )
     assert exchange.venue2_name == "AEVO"
-    assert exchange.bn_maker_fee == 0.00000  # 0.00% maker a Aevo
-    assert exchange.bn_taker_fee == 0.00025  # 0.025% taker a Aevo
+    assert exchange.bn_maker_fee == 0.00030  # 0.030% maker a Aevo
+    assert exchange.bn_taker_fee == 0.00050  # 0.050% taker a Aevo
     print("  test_aevo_paper_exchange_fees passat.")
 
 def test_main_app_initialization_with_aevo():

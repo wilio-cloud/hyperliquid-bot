@@ -74,8 +74,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <div class="container">
         <header>
             <div>
-                <h1>⚡ Arbitratge Delta-Neutral <span class="badge">EN VIU</span></h1>
-                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="header-sub">Hyperliquid DEX vs Aevo DEX • 100% Descentralitzat (DEX-to-DEX)</div>
+                <h1>⚡ Arbitratge Delta-Neutral <span class="badge" id="badge-mode" style="background: #f59e0b; color: #1e293b;">SIMULACIÓ (PAPER)</span></h1>
+                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="header-sub">Hyperliquid DEX vs Aevo DEX • Dades de Mercat L2 en Temps Real (Sense Diners Reals)</div>
             </div>
             <div style="text-align: right;">
                 <span class="badge-strategy" id="mode-tag">DELTA-NEUTRAL ARB (2x)</span>
@@ -678,6 +678,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     tagEl.innerText = `DELTA-NEUTRAL ARB (${m.leverage_str || '2x'})${regTxt}`;
                 }
 
+                const badgeMode = document.getElementById('badge-mode');
+                if (badgeMode) {
+                    if (m.execution_mode === 'live') {
+                        badgeMode.innerText = 'DINERS REALS (LIVE)';
+                        badgeMode.style.background = '#ef4444';
+                        badgeMode.style.color = '#ffffff';
+                    } else {
+                        badgeMode.innerText = m.maker_first ? 'SIMULACIÓ (PAPER • MAKER-FIRST)' : 'SIMULACIÓ (PAPER TRADING)';
+                        badgeMode.style.background = '#f59e0b';
+                        badgeMode.style.color = '#1e293b';
+                    }
+                }
+
                 // Mètriques principals
                 const totalBal = (typeof m.balance === 'number') ? m.balance : 1000.0;
                 document.getElementById('balance').innerText = totalBal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' $';
@@ -743,7 +756,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const minSpreadVal = (typeof m.min_spread === 'number') ? m.min_spread : 0.120;
                 const minSpreadLabel = document.getElementById('min-spread-label');
                 if (minSpreadLabel) {
-                    const regDesc = m.is_weekend ? 'Mode Cap de Setmana' : 'Mode Setmanal';
+                    const regDesc = m.maker_first ? 'Maker-First Optimitzat' : (m.is_weekend ? 'Mode Cap de Setmana' : 'Mode Setmanal');
                     minSpreadLabel.innerHTML = `Llindar mínim: <b style="color: #10b981;">±${minSpreadVal.toFixed(3)}%</b> (${regDesc})`;
                 }
 

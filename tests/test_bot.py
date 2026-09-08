@@ -151,6 +151,60 @@ def test_micro_mean_reversion_trend_filter():
     assert sig_valid.action == "BUY"
     assert "Trend Bullish" in sig_valid.reason
 
+def test_vertex_ws_client_and_fees():
+    from core.vertex_ws_client import VertexWSClient
+    from core.arbitrage_paper_exchange import ArbitragePaperExchange
+    
+    # 1. Verificació de product IDs
+    client = VertexWSClient(coins=["BTC", "ETH", "SOL", "SUI"])
+    assert client.coin_to_pid["BTC"] == 2
+    assert client.coin_to_pid["ETH"] == 4
+    assert client.coin_to_pid["SOL"] == 12
+    assert client.coin_to_pid["SUI"] == 28
+
+    # 2. Verificació de 0% maker fee per a Vertex
+    exchange = ArbitragePaperExchange(venue2_name="VERTEX")
+    assert exchange.bn_maker_fee == 0.00000, "Vertex ha de tenir 0% maker fee"
+    assert exchange.bn_taker_fee == 0.00020, "Vertex ha de tenir 0.02% taker fee"
+
+def test_maker_first_fee_savings():
+    from core.arbitrage_models import ArbitrageDirection, ArbitrageSignal
+    from core.arbitrage_paper_exchange import ArbitragePaperExchange
+    
+    # Mode estàndard Taker
+    ex_taker = ArbitragePaperExchange(venue2_name="AEVO", maker_first=False)
+    sig = ArbitrageSignal(
+        coin="BTC",
+        direction=ArbitrageDirection.SELL_HL_BUY_BN,
+        hl_price=60100.0,
+        bn_price=60000.0,
+        spread_pct=0.166,
+    )
+    pos_taker = ex_taker.open_arbitrage_position(sig, size_usd=1000.0, is_maker=False)
+    assert pos_taker is not None
+    # HL Taker: 1000 * 0.00045 = 0.45$, Aevo Taker: 1000 * 0.00050 = 0.50$ -> Total = 0.95$
+    assert abs(pos_taker.leg_hl.fees_paid - 0.45) < 1e-4
+
+    # Mode Maker-First
+    ex_maker = ArbitragePaperExchange(venue2_name="AEVO", maker_first=True)
+    pos_maker = ex_maker.open_arbitrage_position(sig, size_usd=1000.0, is_maker=False)
+    assert pos_maker is not None
+    # HL Maker: 1000 * 0.00015 = 0.15$ (estalvi del 66% a la pota HL!)
+    assert abs(pos_maker.leg_hl.fees_paid - 0.15) < 1e-4
+    assert pos_maker.leg_hl.fees_paid < pos_taker.leg_hl.fees_paid
+
+def test_cross_arbitrage_maker_first_spread_calibration():
+    from strategies.cross_arbitrage import CrossExchangeArbitrageStrategy
+
+    strat_taker = CrossExchangeArbitrageStrategy(maker_first=False)
+    strat_maker = CrossExchangeArbitrageStrategy(maker_first=True)
+
+    spread_taker = strat_taker.get_effective_min_spread("ETH")
+    spread_maker = strat_maker.get_effective_min_spread("ETH")
+
+    assert spread_maker < spread_taker
+    assert spread_maker <= 0.110, "En mode Maker-First el spread mínim ha de ser <= 0.110%"
+
 if __name__ == "__main__":
     test_paper_exchange_post_only_rejection()
     test_paper_exchange_order_queue_and_fill()
@@ -158,4 +212,7 @@ if __name__ == "__main__":
     test_risk_manager_circuit_breaker()
     test_orderbook_imbalance_strategy()
     test_micro_mean_reversion_trend_filter()
+    test_vertex_ws_client_and_fees()
+    test_maker_first_fee_savings()
+    test_cross_arbitrage_maker_first_spread_calibration()
     print("Tots els tests unitaris han passat correctament!")

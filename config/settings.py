@@ -17,8 +17,18 @@ class BotConfig(BaseModel):
     initial_balance_usd: float = 10000.0
     
     # Comissions de Hyperliquid (Maker molt baix o 0%, Taker estàndard)
-    maker_fee_rate: float = 0.00010  # 0.01% (pot ser 0% o negatiu amb rebates)
-    taker_fee_rate: float = 0.00035  # 0.035%
+    maker_fee_rate: float = 0.00015  # 0.015% (Tier 0 base, pot ser 0% o negatiu amb rebates)
+    taker_fee_rate: float = 0.00045  # 0.045%
+    hl_referral_code: str = ""       # Codi de referit per obtenir -4% directe a HL
+
+    # Comissions per a plataformes auxiliars (Arbitratge Creuat)
+    aevo_maker_fee: float = 0.00030   # 0.030%
+    aevo_taker_fee: float = 0.00050   # 0.050%
+    vertex_maker_fee: float = 0.00000 # 0.000% (0% Maker a Vertex)
+    vertex_taker_fee: float = 0.00020 # 0.020% (Taker molt baix a Vertex)
+
+    # Mode d'execució d'entrada en arbitratge (Maker-First per minimitzar fees)
+    maker_first: bool = False
     
     # Gestió de posició per minioperació (1.000$ per trade = 10% del compte)
     position_size_usd: float = 1000.0  # Mida de cada ordre en dòlars
