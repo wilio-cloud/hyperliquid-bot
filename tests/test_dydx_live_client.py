@@ -282,3 +282,29 @@ def test_arbitrage_live_exchange_anti_unhedged_with_dydx():
     assert hl_mock.market_close.called
     kwargs = hl_mock.market_close.call_args.kwargs
     assert kwargs["coin"] == "SOL"
+
+
+def test_adaptive_max_book_spread_for_dydx():
+    import os
+    from main import ArbitrageTradingBotApp
+
+    # Per defecte a dYdX ha de ser 0.500%
+    app_dydx = ArbitrageTradingBotApp(coins=["SOL"], venue2="dydx", headless=True)
+    assert app_dydx.strategy.max_book_spread_pct == 0.500
+
+    # Per defecte a Aevo ha de ser 0.220%
+    app_aevo = ArbitrageTradingBotApp(coins=["SOL"], venue2="aevo", headless=True)
+    assert app_aevo.strategy.max_book_spread_pct == 0.220
+
+    # Si es passa explícit, s'ha de respectar
+    app_custom = ArbitrageTradingBotApp(coins=["SOL"], venue2="dydx", max_book_spread=0.350, headless=True)
+    assert app_custom.strategy.max_book_spread_pct == 0.350
+
+    # Si es defineix variable d'entorn MAX_BOOK_SPREAD, s'ha de respectar
+    os.environ["MAX_BOOK_SPREAD"] = "0.420"
+    try:
+        app_env = ArbitrageTradingBotApp(coins=["SOL"], venue2="dydx", headless=True)
+        assert app_env.strategy.max_book_spread_pct == 0.420
+    finally:
+        del os.environ["MAX_BOOK_SPREAD"]
+

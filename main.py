@@ -62,7 +62,7 @@ class ArbitrageTradingBotApp:
         size_usd: float = 250.0,
         headless: bool = False,
         max_positions: int = 4,
-        max_book_spread: float = 0.220,
+        max_book_spread: Optional[float] = None,
         initial_balance: float = 1000.0,
         leverage: float = 2.0,
         dynamic_size: bool = True,
@@ -86,6 +86,13 @@ class ArbitrageTradingBotApp:
             self.venue2_label = "Vertex Protocol (0% Maker)"
         else:
             self.venue2_label = "Binance"
+
+        if max_book_spread is None:
+            env_book_spread = os.environ.get("MAX_BOOK_SPREAD")
+            if env_book_spread:
+                max_book_spread = float(env_book_spread)
+            else:
+                max_book_spread = 0.500 if self.venue2 == "dydx" else 0.220
 
         self.size_usd = size_usd
         self.headless = headless
@@ -840,8 +847,9 @@ def main():
     min_profit_default = float(os.environ.get("MIN_PROFIT", "0.25"))
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
     max_positions_default = int(os.environ.get("MAX_POSITIONS", "4"))
-    max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", "0.220"))
     venue2_default = os.environ.get("VENUE2", "aevo").lower()
+    default_book_spread = "0.500" if venue2_default == "dydx" else "0.220"
+    max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", default_book_spread))
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
     leverage_default = float(os.environ.get("LEVERAGE", "2.0"))
     dynamic_size_default = os.environ.get("DYNAMIC_SIZE", "true").lower() in ("true", "1", "yes")
@@ -868,7 +876,7 @@ def main():
     parser.add_argument("--min-profit", type=float, default=min_profit_default, help="Benefici net mínim permès per trade tancat (default: 0.10$)")
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
     parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 4)")
-    parser.add_argument("--max-book-spread", type=float, default=max_book_spread_default, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.350%%)")
+    parser.add_argument("--max-book-spread", type=float, default=None, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.500% per a dYdX, 0.220% per a Aevo/altres)")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
     parser.add_argument("--live", action="store_true", help="Activar mode d'execució en real a Hyperliquid i Aevo")
