@@ -59,14 +59,14 @@ class ArbitrageTradingBotApp:
         weekend_min_spread: float = 0.240,
         min_profit_usd: float = 0.25,
         exit_spread: float = 0.010,
-        size_usd: float = 250.0,
+        size_usd: float = 200.0,
         headless: bool = False,
-        max_positions: int = 4,
+        max_positions: int = 6,
         max_book_spread: Optional[float] = None,
         initial_balance: float = 1000.0,
         leverage: float = 2.0,
         dynamic_size: bool = True,
-        size_pct: float = 25.0,
+        size_pct: float = 16.6,
         min_size_usd: float = 100.0,
         max_size_usd: float = 2500.0,
         state_file: Optional[str] = None,
@@ -846,15 +846,15 @@ def main():
     weekend_min_spread_default = float(os.environ.get("WEEKEND_MIN_SPREAD", "0.240"))
     min_profit_default = float(os.environ.get("MIN_PROFIT", "0.25"))
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
-    max_positions_default = int(os.environ.get("MAX_POSITIONS", "4"))
+    max_positions_default = int(os.environ.get("MAX_POSITIONS", "6"))
     venue2_default = os.environ.get("VENUE2", "aevo").lower()
     default_book_spread = "0.500" if venue2_default == "dydx" else "0.220"
     max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", default_book_spread))
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
     leverage_default = float(os.environ.get("LEVERAGE", "2.0"))
     dynamic_size_default = os.environ.get("DYNAMIC_SIZE", "true").lower() in ("true", "1", "yes")
-    size_pct_default = float(os.environ.get("SIZE_PCT", "25.0"))
-    size_default = float(os.environ.get("SIZE", "250.0"))
+    size_pct_default = float(os.environ.get("SIZE_PCT", "16.6"))
+    size_default = float(os.environ.get("SIZE", "200.0"))
     min_size_default = float(os.environ.get("MIN_SIZE", "100.0"))
     max_size_default = float(os.environ.get("MAX_SIZE", "2500.0"))
 
@@ -895,7 +895,7 @@ def main():
         elif env_coins:
             coins = [c.strip().upper() for c in env_coins.split(",") if c.strip()]
         elif args.venue2 == "dydx":
-            default_coins = ["SOL", "SUI", "NEAR", "ZEC", "DOGE", "LINK", "WIF"]
+            default_coins = ["SOL", "SUI", "NEAR", "ZEC", "DOGE", "LINK", "WIF", "AVAX", "PEPE"]
             coins = default_coins
         elif args.venue2 == "vertex":
             default_coins = ["BTC", "ETH", "SOL", "ARB", "SUI", "LINK", "AVAX"]

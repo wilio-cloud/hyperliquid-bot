@@ -312,19 +312,20 @@ class CrossExchangeArbitrageStrategy:
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
             order_size_usd = pos.leg_hl.size * pos.leg_hl.entry_price
-            # Take profit proporcional (mínim 0.40$ o 0.15% net del valor de l'ordre)
-            target_tp = max(0.40, order_size_usd * 0.0015)
+            # Take profit proporcional més dinàmic (mínim 0.25$ o 0.10% net del valor de l'ordre)
+            target_tp = max(0.25, order_size_usd * 0.0010)
             if self.take_profit_usd and 0 < self.take_profit_usd < target_tp:
                 target_tp = self.take_profit_usd
 
-            target_min_profit = min(self.min_profit_usd, max(0.20, order_size_usd * 0.0008))
+            target_min_profit = min(self.min_profit_usd, max(0.12, order_size_usd * 0.0006))
 
             # 1. Take profit anticipat si el benefici net real arriba a l'objectiu
             if projected_net_pnl >= target_tp:
                 return ("TAKE_PROFIT_TARGET", hl_exit_px, bn_exit_px)
 
-            # 2. Convergència reeixida NOMÉS si el benefici net supera el mínim garantit
-            if current_spread_to_close <= self.target_exit_spread_pct:
+            # 2. Convergència reeixida si el spread s'ha reduït prou (<= 0.040% o <= entry * 0.4) i el guany net és positiu garantit
+            max_conv_spread = max(self.target_exit_spread_pct, 0.040)
+            if (current_spread_to_close <= max_conv_spread or current_spread_to_close <= pos.entry_spread_pct * 0.40):
                 if projected_net_pnl >= target_min_profit:
                     return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
 
@@ -357,16 +358,17 @@ class CrossExchangeArbitrageStrategy:
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
             order_size_usd = pos.leg_hl.size * pos.leg_hl.entry_price
-            target_tp = max(0.40, order_size_usd * 0.0015)
+            target_tp = max(0.25, order_size_usd * 0.0010)
             if self.take_profit_usd and 0 < self.take_profit_usd < target_tp:
                 target_tp = self.take_profit_usd
 
-            target_min_profit = min(self.min_profit_usd, max(0.20, order_size_usd * 0.0008))
+            target_min_profit = min(self.min_profit_usd, max(0.12, order_size_usd * 0.0006))
 
             if projected_net_pnl >= target_tp:
                 return ("TAKE_PROFIT_TARGET", hl_exit_px, bn_exit_px)
 
-            if current_spread_to_close <= self.target_exit_spread_pct:
+            max_conv_spread = max(self.target_exit_spread_pct, 0.040)
+            if (current_spread_to_close <= max_conv_spread or current_spread_to_close <= pos.entry_spread_pct * 0.40):
                 if projected_net_pnl >= target_min_profit:
                     return ("CONVERGENCE_TARGET", hl_exit_px, bn_exit_px)
 
@@ -382,12 +384,16 @@ class CrossExchangeArbitrageStrategy:
         # Mai sortim en negatiu per temps. Com que som 100% delta-neutral, esperem la convergència.
         # Només permetem sortida si el PnL net és sòlidament positiu després de totes les comissions:
         pos_age = time.time() - pos.entry_time
-        # A) Si porta > 15 minuts (900s) i el PnL net és >= +0.20$, tanca per alliberar la ranura amb guany
-        if pos_age >= 900.0 and projected_net_pnl >= 0.20:
+        # A) Si porta > 15 minuts (900s) i el PnL net és >= +0.15$, tanca ràpid per alliberar la ranura
+        if pos_age >= 900.0 and projected_net_pnl >= 0.15:
             return ("TIME_QUICK_PROFIT", hl_exit_px, bn_exit_px)
 
-        # B) Si porta > 30 minuts (1800s) i el PnL net és >= +0.15$, tanca amb guany net garantit
-        if pos_age >= 1800.0 and projected_net_pnl >= 0.15:
+        # B) Si porta > 30 minuts (1800s) i el PnL net és >= +0.08$, tanca amb guany net
+        if pos_age >= 1800.0 and projected_net_pnl >= 0.08:
             return ("TIME_BREAKEVEN", hl_exit_px, bn_exit_px)
+
+        # C) Si porta > 45 minuts (2700s) i el PnL net cobreix totes les comissions (>= +0.02$), allibera ranura
+        if pos_age >= 2700.0 and projected_net_pnl >= 0.02:
+            return ("TIME_SLOT_FREE", hl_exit_px, bn_exit_px)
 
         return None
