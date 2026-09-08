@@ -323,7 +323,9 @@ class HyperliquidLiveClient:
         def _execute():
             return self.exchange.cancel(hl_coin, oid)
         try:
-            return await asyncio.to_thread(_execute)
+            res = await asyncio.to_thread(_execute)
+            logger.info(f"Cancel·lació d'ordre Hyperliquid {coin} OID {oid}: {res}")
+            return res
         except Exception as e:
             logger.error(f"Error cancel_order Hyperliquid: {e}")
             return {"status": "err", "error": str(e)}

@@ -274,3 +274,48 @@ def test_configure_all_leverage():
     assert res.get("leverage") == 2
     assert hl_mock.set_leverage.call_count == 6
     assert aevo_mock.set_leverage.call_count == 6
+
+
+def test_maker_first_resting_timeout_and_cancel():
+    """Verifica que una ordre Maker resting que no s'omple és cancel·lada i Venue2 mai és tocat."""
+    hl_mock = MagicMock(spec=HyperliquidLiveClient)
+    hl_mock.round_size.side_effect = lambda c, s: round(s, 2)
+    hl_mock.place_order = AsyncMock(return_value={"status": "resting", "oid": 88888})
+    hl_mock.get_account_state = AsyncMock(return_value={"assetPositions": []})
+    hl_mock.cancel_order = AsyncMock(return_value={"status": "ok"})
+    hl_mock.cancel_all_orders = AsyncMock(return_value=[])
+
+    aevo_mock = MagicMock(spec=AevoLiveClient)
+    aevo_mock.round_size.side_effect = lambda c, s: round(s, 2)
+    aevo_mock.place_order = AsyncMock(return_value={"status": "ok"})
+
+    exchange = ArbitrageLiveExchange(
+        hl_client=hl_mock,
+        aevo_client=aevo_mock,
+        initial_hl_balance=500.0,
+        initial_bn_balance=500.0,
+        leverage=2.0,
+        maker_first=True,
+        state_file="/tmp/test_maker_timeout.json",
+    )
+
+    sig = ArbitrageSignal(
+        coin="LINK",
+        direction=ArbitrageDirection.BUY_HL_SELL_BN,
+        spread_pct=0.250,
+        hl_price=12.50,
+        bn_price=12.70,
+        timestamp=1000.0,
+    )
+
+    # Patch asyncio.sleep per no esperar 3 segons en el test
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        asyncio.run(exchange._execute_live_open(sig, size_usd=30.0, is_maker=True))
+
+    # HL cancel_order ha d'haver estat cridat amb OID 88888
+    hl_mock.cancel_order.assert_called_once_with("LINK", 88888)
+    hl_mock.cancel_all_orders.assert_called_once_with(coin="LINK")
+    # Venue2 mai ha de ser tocat!
+    aevo_mock.place_order.assert_not_called()
+    assert len(exchange.active_positions) == 0
+

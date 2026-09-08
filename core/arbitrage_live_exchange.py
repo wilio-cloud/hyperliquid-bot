@@ -342,10 +342,12 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             hl_ok = False
             hl_fill_type = "TAKER"
             if isinstance(hl_res, dict):
-                if hl_res.get("status") == "ok":
+                # 1. Si no és PostOnly i status és "ok" -> fill immediat com a Taker
+                # 2. Si té el camp "fill" explícit -> fill immediat
+                if hl_res.get("status") == "ok" and (not use_post_only or "fill" in hl_res):
                     hl_ok = True
                     hl_fill_type = "MAKER" if use_post_only else "TAKER"
-                elif hl_res.get("status") == "resting":
+                elif hl_res.get("status") == "resting" or (use_post_only and hl_res.get("status") == "ok"):
                     # L'ordre Maker està al llibre. Esperem fins a 3 segons que s'ompli passivament
                     oid = hl_res.get("oid")
                     logger.info(f"Ordre Maker {coin} descansant al llibre (OID {oid}). Esperant execució passiva (3s max)...")
@@ -366,9 +368,15 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                         if hl_ok:
                             break
 
-                    if not hl_ok and oid:
-                        logger.info(f"Timeout ordre Maker {coin}. Cancel·lant OID {oid} a cost 0$ gas...")
-                        await self.hl_client.cancel_order(coin, oid)
+                    if not hl_ok:
+                        if oid:
+                            logger.info(f"Timeout ordre Maker {coin}. Cancel·lant OID {oid} a cost 0$ gas...")
+                            c_res = await self.hl_client.cancel_order(coin, oid)
+                            logger.info(f"Cancel·lació OID {oid} executada: {c_res}")
+                        try:
+                            await self.hl_client.cancel_all_orders(coin=coin)
+                        except Exception as ce:
+                            logger.debug(f"Neteja d'ordres pendents per {coin}: {ce}")
 
             # Si Hyperliquid no s'omple o falla, avortem immediatament sense tocar Aevo (0 risc, 0 exposició)
             if not hl_ok:
