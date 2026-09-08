@@ -50,6 +50,12 @@ SYMBOL_MAP = {
     "WIF": "WIF-USD",
     "BTC": "BTC-USD",
     "ETH": "ETH-USD",
+    "APT": "APT-USD",
+    "SEI": "SEI-USD",
+    "RENDER": "RENDER-USD",
+    "ENA": "ENA-USD",
+    "AAVE": "AAVE-USD",
+    "UNI": "UNI-USD",
 }
 
 REVERSE_SYMBOL_MAP = {v: k for k, v in SYMBOL_MAP.items()}

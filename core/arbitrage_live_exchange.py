@@ -234,14 +234,18 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         except Exception as e:
             logger.error(f"Error sincronitzant saldos reals: {e}")
 
-    async def configure_all_leverage(self, leverage: Optional[int] = None) -> Dict[str, Any]:
-        """Configura el palanquejament desitjat (ex: 2x) i Cross Margin a Hyperliquid i Aevo per a tots els mercats."""
+    async def configure_all_leverage(self, leverage: Optional[int] = None, coins: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Configura el palanquejament desitjat (ex: 2x) i Cross Margin a Hyperliquid i Venue2 per a tots els mercats."""
         lev = int(leverage or self.leverage or 2)
         results = {"status": "ok", "leverage": lev, "hl": {}, "aevo": {}}
-        coins = ["SOL", "HYPE", "NEAR", "PUMP", "SUI", "ZEC"]
-        logger.info(f"⚡ [LEVERAGE] Aplicant {lev}x Cross Margin a Hyperliquid i Aevo per a {coins}...")
+        target_coins = coins or [
+            "ETH", "BTC", "SOL", "SUI", "NEAR", "LINK", "AVAX",
+            "ARB", "OP", "APT", "SEI", "TIA", "RENDER", "INJ",
+            "ENA", "DOGE", "WIF", "AAVE", "UNI"
+        ]
+        logger.info(f"⚡ [LEVERAGE] Aplicant {lev}x Cross Margin a Hyperliquid i {self.venue2_name} per a {len(target_coins)} monedes...")
 
-        async def _configure_coin(c):
+        for c in target_coins:
             try:
                 hl_res = await self.hl_client.set_leverage(c, leverage=lev, is_cross=True)
             except Exception as e:
@@ -250,17 +254,13 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 aevo_res = await self.aevo_client.set_leverage(c, leverage=lev)
             except Exception as e:
                 aevo_res = {"status": "err", "error": str(e)}
-            return c, hl_res, aevo_res
 
-        outcomes = await asyncio.gather(*[_configure_coin(c) for c in coins], return_exceptions=True)
-        for out in outcomes:
-            if isinstance(out, tuple) and len(out) == 3:
-                c, hl_res, aevo_res = out
-                results["hl"][c] = hl_res
-                results["aevo"][c] = aevo_res
+            results["hl"][c] = hl_res
+            results["aevo"][c] = aevo_res
+            self._configured_leverage_coins.add(c)
+            await asyncio.sleep(0.05)
 
-        self._configured_leverage_coins.update(coins)
-        logger.info(f"⚡ [LEVERAGE] Resultats de configuració ({lev}x): {results}")
+        logger.info(f"⚡ [LEVERAGE] Configuració completada ({lev}x) per a {len(target_coins)} monedes.")
         return results
 
     def open_arbitrage_position(

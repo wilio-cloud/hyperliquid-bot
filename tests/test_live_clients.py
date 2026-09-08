@@ -269,7 +269,7 @@ def test_configure_all_leverage():
         leverage=2.0,
         state_file="/tmp/test_live_state_lev.json",
     )
-    res = asyncio.run(exchange.configure_all_leverage(leverage=2))
+    res = asyncio.run(exchange.configure_all_leverage(leverage=2, coins=["SOL", "SUI", "NEAR", "LINK", "AVAX", "ETH"]))
     assert res.get("status") == "ok"
     assert res.get("leverage") == 2
     assert hl_mock.set_leverage.call_count == 6

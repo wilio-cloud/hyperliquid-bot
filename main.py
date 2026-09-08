@@ -709,7 +709,7 @@ class ArbitrageTradingBotApp:
             await self.exchange.sync_real_balances()
             logger.info(f"⚡ [MODE REAL] Configurant palanquejament a {int(self.leverage)}x a Hyperliquid i {self.venue2_label}...")
             try:
-                await self.exchange.configure_all_leverage()
+                await self.exchange.configure_all_leverage(leverage=int(self.leverage), coins=self.coins)
             except Exception as e:
                 logger.error(f"Error configurant palanquejament inicial: {e}")
             self._balance_sync_task = asyncio.create_task(self._run_balance_sync_loop())
@@ -938,7 +938,11 @@ def main():
         elif env_coins:
             coins = [c.strip().upper() for c in env_coins.split(",") if c.strip()]
         elif args.venue2 == "dydx":
-            default_coins = ["SOL", "SUI", "NEAR", "ZEC", "DOGE", "LINK", "WIF", "AVAX", "PEPE"]
+            default_coins = [
+                "ETH", "BTC", "SOL", "SUI", "NEAR", "LINK", "AVAX",
+                "ARB", "OP", "APT", "SEI", "TIA", "RENDER", "INJ",
+                "ENA", "DOGE", "WIF", "AAVE", "UNI"
+            ]
             coins = default_coins
         elif args.venue2 == "vertex":
             default_coins = ["BTC", "ETH", "SOL", "ARB", "SUI", "LINK", "AVAX"]
