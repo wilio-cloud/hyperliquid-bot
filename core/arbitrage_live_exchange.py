@@ -423,14 +423,27 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
             # 3. PAS B: Hyperliquid omplert! Enviament immediat de cobertura a venue2
             logger.info(f"Pota Hyperliquid omplerta ({hl_fill_type}) per a {coin}. Enviant cobertura immediata a {self.venue2_name}...")
+            latest_bn = self._last_bn_books.get(coin)
+            if latest_bn and latest_bn.best_bid and latest_bn.best_ask:
+                base_hedge_px = latest_bn.best_ask if aevo_is_buy else latest_bn.best_bid
+            else:
+                base_hedge_px = signal.bn_price
+            hedge_px = base_hedge_px * 1.002 if aevo_is_buy else base_hedge_px * 0.998
+
             try:
+                extra_kwargs = {}
+                import inspect
+                if "ioc" in inspect.signature(self.aevo_client.place_order).parameters:
+                    extra_kwargs["ioc"] = True
+
                 aevo_res = await self.aevo_client.place_order(
                     coin=coin,
                     is_buy=aevo_is_buy,
                     size=aevo_sz,
-                    price=signal.bn_price,
+                    price=hedge_px,
                     post_only=False,
                     reduce_only=False,
+                    **extra_kwargs,
                 )
             except Exception as e:
                 aevo_res = {"status": "err", "error": str(e)}
@@ -566,14 +579,27 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 return
 
             # Hyperliquid tancat! Ara tanquem venue2 amb reduce_only
+            latest_bn = self._last_bn_books.get(coin)
+            if latest_bn and latest_bn.best_bid and latest_bn.best_ask:
+                base_close_px = latest_bn.best_ask if aevo_is_buy_to_close else latest_bn.best_bid
+            else:
+                base_close_px = bn_exit_price
+            close_px = base_close_px * 1.003 if aevo_is_buy_to_close else base_close_px * 0.997
+
             try:
+                extra_kwargs = {}
+                import inspect
+                if "ioc" in inspect.signature(self.aevo_client.place_order).parameters:
+                    extra_kwargs["ioc"] = True
+
                 aevo_res = await self.aevo_client.place_order(
                     coin=coin,
                     is_buy=aevo_is_buy_to_close,
                     size=pos.leg_bn.size,
-                    price=bn_exit_price,
+                    price=close_px,
                     post_only=False,
                     reduce_only=True,
+                    **extra_kwargs,
                 )
             except Exception as e:
                 aevo_res = {"status": "err", "error": str(e)}
