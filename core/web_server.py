@@ -1087,6 +1087,15 @@ class WebDashboardServer:
                                     spot_val = float(b.get("total", 0.0))
                                     break
 
+                    recent_fills = []
+                    fills_payload = {"type": "userFills", "user": wallet_addr}
+                    try:
+                        async with session.post(url, json=fills_payload) as resp_fills:
+                            if resp_fills.status == 200:
+                                recent_fills = await resp_fills.json()
+                    except Exception as fe:
+                        logger.debug(f"Error consultant userFills: {fe}")
+
                     total_hl = account_val + spot_val
                     diag["hyperliquid"] = {
                         "status": "CONNECTED",
@@ -1096,6 +1105,8 @@ class WebDashboardServer:
                         "withdrawable_usd": round(withdrawable, 2),
                         "open_positions_count": open_pos_count,
                         "open_positions": open_pos_details,
+                        "recent_fills_count": len(recent_fills),
+                        "recent_fills": recent_fills[:10] if isinstance(recent_fills, list) else [],
                         "agent_key_configured": bool(hl_key),
                     }
             except Exception as e:
