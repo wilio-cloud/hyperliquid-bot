@@ -84,6 +84,8 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                     pos = p.get("position", {})
                     szi = float(pos.get("szi", 0.0))
                     c = pos.get("coin", "").upper()
+                    if c == "KPEPE":
+                        c = "PEPE"
                     if szi != 0.0 and c:
                         hl_positions_map[c] = pos
 
@@ -351,7 +353,8 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                             st = await self.hl_client.get_account_state()
                             for p in st.get("assetPositions", []):
                                 pos = p.get("position", {})
-                                if pos.get("coin", "").upper() == coin and abs(float(pos.get("szi", 0.0))) > 0:
+                                p_coin = pos.get("coin", "").upper()
+                                if (p_coin == coin or (coin == "PEPE" and p_coin == "KPEPE")) and abs(float(pos.get("szi", 0.0))) > 0:
                                     hl_ok = True
                                     hl_fill_type = "MAKER"
                                     logger.info(f"✅ Ordre Maker {coin} omplerta passivament al llibre! (0.015% Maker fee)")

@@ -25,6 +25,8 @@ COIN_SZ_DECIMALS = {
     "TIA": 1,
     "INJ": 1,
     "ZEC": 2,
+    "kPEPE": 0,
+    "PEPE": 0,
 }
 
 class HyperliquidLiveClient:
@@ -167,10 +169,11 @@ class HyperliquidLiveClient:
 
     async def set_leverage(self, coin: str, leverage: int = 2, is_cross: bool = True) -> Dict[str, Any]:
         """Ajusta el palanquejament per a un actiu a Hyperliquid."""
+        hl_coin = "kPEPE" if coin.upper() == "PEPE" else coin.upper()
         def _execute():
             return self.exchange.update_leverage(
                 leverage=int(leverage),
-                name=coin.upper(),
+                name=hl_coin,
                 is_cross=is_cross,
             )
 
@@ -197,23 +200,29 @@ class HyperliquidLiveClient:
         - ioc: TIF = 'Ioc' (Immediate Or Cancel / Taker immediat)
         - per defecte: TIF = 'Gtc'
         """
-        rounded_sz = self.round_size(coin, size)
+        hl_coin = "kPEPE" if coin.upper() == "PEPE" else coin.upper()
+        mult = 1000.0 if coin.upper() == "PEPE" else 1.0
+
+        target_size = size / mult
+        target_price = price * mult
+
+        rounded_sz = self.round_size(hl_coin, target_size)
         if rounded_sz <= 0:
             return {"status": "err", "error": f"Mida invàlida per a {coin}: {size}"}
 
         # Collar de seguretat de 0.05% per a ordres IOC per assegurar fill immediat al millor preu
         if ioc:
-            collar_px = price * (1.0005 if is_buy else 0.9995)
-            rounded_px = self.round_price(coin, collar_px)
+            collar_px = target_price * (1.0005 if is_buy else 0.9995)
+            rounded_px = self.round_price(hl_coin, collar_px)
         else:
-            rounded_px = self.round_price(coin, price)
+            rounded_px = self.round_price(hl_coin, target_price)
 
         tif = "Alo" if post_only else ("Ioc" if ioc else "Gtc")
         order_type = {"limit": {"tif": tif}}
 
         def _execute():
             return self.exchange.order(
-                name=coin.upper(),
+                name=hl_coin,
                 is_buy=is_buy,
                 sz=rounded_sz,
                 limit_px=rounded_px,
@@ -238,15 +247,17 @@ class HyperliquidLiveClient:
                                 return {"status": "err", "error": err_msg, "raw": res}
                             elif "resting" in st0:
                                 logger.warning(f"Ordre Hyperliquid pendent al llibre (resting, no omplerta) per a {coin}: {st0}")
-                                return {"status": "resting", "oid": st0["resting"].get("oid"), "raw": res}
+                                return {"status": "resting", "oid": st0.get("resting", {}).get("oid"), "raw": res}
                             elif "filled" in st0:
-                                return {"status": "ok", "filled": st0["filled"], "raw": res}
+                                fill_info = st0.get("filled", {})
+                                logger.info(f"Hyperliquid ordre {coin} omplerta: {fill_info}")
+                                return {"status": "ok", "fill": fill_info, "raw": res}
                 elif res.get("status") == "err":
                     logger.error(f"Hyperliquid ha retornat error: {res.get('response')}")
                     return res
-            return res
+            return {"status": "ok", "raw": res}
         except Exception as e:
-            logger.error(f"Error executant ordre Hyperliquid: {e}")
+            logger.error(f"Excepció enviant ordre Hyperliquid per a {coin}: {e}")
             return {"status": "err", "error": str(e)}
 
     async def market_open(self, coin: str, is_buy: bool, size: float, slippage: float = 0.01) -> Dict[str, Any]:
@@ -268,30 +279,33 @@ class HyperliquidLiveClient:
     async def market_close(self, coin: str, size: Optional[float] = None, slippage: float = 0.02) -> Dict[str, Any]:
         """Tanca immediatament qualsevol posició oberta a mercat (Rollback de seguretat)."""
         try:
+            hl_coin = "kPEPE" if coin.upper() == "PEPE" else coin.upper()
+            mult = 1000.0 if coin.upper() == "PEPE" else 1.0
+
             acc_state = await self.get_account_state()
             current_sz = 0.0
             szi = 0.0
             for p in acc_state.get("assetPositions", []):
                 pos = p.get("position", {})
-                if pos.get("coin") == coin.upper():
+                if pos.get("coin") == hl_coin:
                     szi = float(pos.get("szi", 0.0))
-                    current_sz = abs(szi)
+                    current_sz = abs(szi) * mult
                     break
 
             if current_sz <= 0.0:
                 logger.info(f"Cap posició oberta per a {coin} a Hyperliquid per tancar.")
                 return {"status": "ok", "message": f"Cap posició oberta per a {coin}"}
 
-            close_sz = self.round_size(coin, size if size is not None else current_sz)
+            close_sz = size if size is not None else current_sz
             is_buy = (szi < 0.0) # Si estem Short (szi < 0), comprem per tancar. Si Long, venem.
 
             all_mids = await asyncio.to_thread(self.info.all_mids)
-            mid_px = float(all_mids.get(coin.upper(), 0.0))
+            mid_px = float(all_mids.get(hl_coin, 0.0)) / mult
             if mid_px <= 0.0:
                 return {"status": "err", "error": f"No s'ha pogut obtenir preu de mercat per a {coin}"}
 
             agg_px = mid_px * (1.015 if is_buy else 0.985)
-            logger.info(f"Executant market_close a Hyperliquid per a {coin}: {'BUY' if is_buy else 'SELL'} {close_sz} @ {agg_px:.6f}")
+            logger.info(f"Executant market_close a Hyperliquid per a {coin}: {'BUY' if is_buy else 'SELL'} {close_sz} @ {agg_px:.8f}")
             return await self.place_order(
                 coin=coin,
                 is_buy=is_buy,
@@ -305,8 +319,9 @@ class HyperliquidLiveClient:
 
     async def cancel_order(self, coin: str, oid: int) -> Dict[str, Any]:
         """Cancel·la una ordre pendent."""
+        hl_coin = "kPEPE" if coin.upper() == "PEPE" else coin.upper()
         def _execute():
-            return self.exchange.cancel(coin.upper(), oid)
+            return self.exchange.cancel(hl_coin, oid)
         try:
             return await asyncio.to_thread(_execute)
         except Exception as e:

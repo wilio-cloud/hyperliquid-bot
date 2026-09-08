@@ -522,6 +522,36 @@ def test_time_based_exit_guards_never_exit_at_loss():
     assert strat.check_exit(pos) is None, "Exit Book Spread Guard ha de bloquejar sortides quan el llibre és il·líquid!"
     print("  Garantia de 0 sortides en negatiu per temps (Profit Guard 100%) i Exit Spread Guard verificats amb èxit.")
 
+def test_pepe_kpepe_mapping():
+    """Verifica que el mapeig de PEPE <-> kPEPE a Hyperliquid escala preus i volums correctament."""
+    from core.ws_client import HyperliquidWSClient, HL_COIN_MAPPINGS, HL_REVERSE_MAPPINGS
+    
+    assert "PEPE" in HL_COIN_MAPPINGS
+    assert HL_COIN_MAPPINGS["PEPE"]["hl_name"] == "kPEPE"
+    assert HL_COIN_MAPPINGS["PEPE"]["multiplier"] == 1000.0
+
+    client = HyperliquidWSClient(coins=["PEPE"])
+    # Simulem un missatge l2Book de Hyperliquid per a kPEPE
+    # Preu kPEPE = 0.003615 per contracte (1000 tokens) -> 0.000003615 per token
+    mock_l2 = {
+        "channel": "l2Book",
+        "data": {
+            "coin": "kPEPE",
+            "time": 1788852407008,
+            "levels": [
+                [{"px": "0.003615", "sz": "1000.0", "n": 1}],
+                [{"px": "0.003620", "sz": "2000.0", "n": 1}],
+            ]
+        }
+    }
+    client._handle_message(mock_l2)
+    assert "PEPE" in client.order_books
+    book = client.order_books["PEPE"]
+    assert abs(book.best_bid - 0.000003615) < 1e-9
+    assert abs(book.best_ask - 0.000003620) < 1e-9
+    assert book.bids[0].size == 1000000.0  # 1000 * 1000
+    print("  Mapeig i escalat de kPEPE -> PEPE verificat amb èxit.")
+
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
     test_arbitrage_execution_and_pnl()
@@ -536,4 +566,5 @@ if __name__ == "__main__":
     test_coin_stats_and_pace_tracking()
     test_per_coin_effective_spread_and_cooldown()
     test_time_based_exit_guards_never_exit_at_loss()
+    test_pepe_kpepe_mapping()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")

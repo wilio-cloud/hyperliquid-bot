@@ -5,7 +5,7 @@ import json
 import logging
 import ssl
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 import certifi
 import websockets
 
@@ -13,6 +13,18 @@ from config.settings import config
 from core.models import BookLevel, OrderBookL2, OrderSide, Trade
 
 logger = logging.getLogger("HyperliquidWS")
+
+# Mapeig de símbols entre la denominació comuna i la de Hyperliquid
+# Ex: PEPE a Hyperliquid cotitza com a kPEPE (on 1 contracte kPEPE = 1.000 tokens PEPE)
+HL_COIN_MAPPINGS: Dict[str, Dict[str, Any]] = {
+    "PEPE": {"hl_name": "kPEPE", "multiplier": 1000.0},
+    "SHIB": {"hl_name": "kSHIB", "multiplier": 1000.0},
+    "BONK": {"hl_name": "kBONK", "multiplier": 1000.0},
+    "FLOKI": {"hl_name": "kFLOKI", "multiplier": 1000.0},
+}
+HL_REVERSE_MAPPINGS: Dict[str, tuple[str, float]] = {
+    v["hl_name"]: (k, v["multiplier"]) for k, v in HL_COIN_MAPPINGS.items()
+}
 
 class HyperliquidWSClient:
     def __init__(
@@ -65,17 +77,18 @@ class HyperliquidWSClient:
                     
                     # Subscriure's a l2Book i trades per a cada moneda
                     for coin in self.coins:
+                        hl_coin = HL_COIN_MAPPINGS.get(coin.upper(), {}).get("hl_name", coin)
                         # Subscripció L2 Book
                         await ws.send(json.dumps({
                             "method": "subscribe",
-                            "subscription": {"type": "l2Book", "coin": coin}
+                            "subscription": {"type": "l2Book", "coin": hl_coin}
                         }))
                         # Subscripció Trades
                         await ws.send(json.dumps({
                             "method": "subscribe",
-                            "subscription": {"type": "trades", "coin": coin}
+                            "subscription": {"type": "trades", "coin": hl_coin}
                         }))
-                        logger.info(f"Subscrit a l2Book i trades per a {coin}")
+                        logger.info(f"Subscrit a l2Book i trades per a {coin} (HL: {hl_coin})")
 
                     # Escolta de missatges
                     async for raw_msg in ws:
@@ -101,9 +114,14 @@ class HyperliquidWSClient:
             return
 
         if channel == "l2Book":
-            coin = data.get("coin")
-            if not coin:
+            raw_coin = data.get("coin")
+            if not raw_coin:
                 return
+
+            if raw_coin in HL_REVERSE_MAPPINGS:
+                coin, mult = HL_REVERSE_MAPPINGS[raw_coin]
+            else:
+                coin, mult = raw_coin, 1.0
             
             levels = data.get("levels", [])
             if len(levels) < 2:
@@ -114,16 +132,16 @@ class HyperliquidWSClient:
 
             bids = [
                 BookLevel(
-                    price=float(item["px"]),
-                    size=float(item["sz"]),
+                    price=float(item["px"]) / mult,
+                    size=float(item["sz"]) * mult,
                     num_orders=int(item.get("n", 1))
                 )
                 for item in raw_bids
             ]
             asks = [
                 BookLevel(
-                    price=float(item["px"]),
-                    size=float(item["sz"]),
+                    price=float(item["px"]) / mult,
+                    size=float(item["sz"]) * mult,
                     num_orders=int(item.get("n", 1))
                 )
                 for item in raw_asks
@@ -146,17 +164,22 @@ class HyperliquidWSClient:
                 return
             
             for item in data:
-                coin = item.get("coin")
-                if not coin:
+                raw_coin = item.get("coin")
+                if not raw_coin:
                     continue
+
+                if raw_coin in HL_REVERSE_MAPPINGS:
+                    coin, mult = HL_REVERSE_MAPPINGS[raw_coin]
+                else:
+                    coin, mult = raw_coin, 1.0
                 
                 # side: 'B' vol dir taker compra (preu puja / verd), 'A' taker ven (preu baixa / vermell)
                 side = OrderSide.BUY if item.get("side") == "B" else OrderSide.SELL
                 trade = Trade(
                     coin=coin,
                     side=side,
-                    price=float(item["px"]),
-                    size=float(item["sz"]),
+                    price=float(item["px"]) / mult,
+                    size=float(item["sz"]) * mult,
                     timestamp=float(item.get("time", time.time() * 1000)) / 1000.0
                 )
 

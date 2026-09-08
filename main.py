@@ -346,7 +346,8 @@ class ArbitrageTradingBotApp:
                             universe = data[0]["universe"]
                             asset_ctxs = data[1]
                             for i, meta in enumerate(universe):
-                                c = meta["name"]
+                                raw_c = meta["name"]
+                                c = "PEPE" if raw_c == "kPEPE" else raw_c
                                 if c in self.coins:
                                     funding_h = float(asset_ctxs[i]["funding"]) * 100.0
                                     self.strategy.update_hl_funding(c, funding_h)
