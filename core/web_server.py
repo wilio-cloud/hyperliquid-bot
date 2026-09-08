@@ -1069,6 +1069,15 @@ class WebDashboardServer:
                             withdrawable = float(data.get("withdrawable", 0.0))
                             positions = data.get("assetPositions", [])
                             open_pos_count = sum(1 for p in positions if float(p.get("position", {}).get("szi", 0.0)) != 0.0)
+                            open_pos_details = [
+                                {
+                                    "coin": p.get("position", {}).get("coin"),
+                                    "szi": float(p.get("position", {}).get("szi", 0.0)),
+                                    "entryPx": float(p.get("position", {}).get("entryPx", 0.0)),
+                                    "unrealizedPnl": float(p.get("position", {}).get("unrealizedPnl", 0.0)),
+                                }
+                                for p in positions if float(p.get("position", {}).get("szi", 0.0)) != 0.0
+                            ]
 
                     async with session.post(url, json=spot_payload) as resp_spot:
                         if resp_spot.status == 200:
@@ -1086,6 +1095,7 @@ class WebDashboardServer:
                         "spot_usdc_usd": round(spot_val, 2),
                         "withdrawable_usd": round(withdrawable, 2),
                         "open_positions_count": open_pos_count,
+                        "open_positions": open_pos_details,
                         "agent_key_configured": bool(hl_key),
                     }
             except Exception as e:
@@ -1113,6 +1123,7 @@ class WebDashboardServer:
                                 "equity_usd": round(equity, 2),
                                 "free_collateral_usd": round(free_col, 2),
                                 "open_positions_count": len(open_pos),
+                                "open_positions": open_pos,
                                 "credentials_configured": bool(dydx_mnemonic or dydx_pk),
                             }
                         elif resp.status == 404:
@@ -1136,11 +1147,18 @@ class WebDashboardServer:
             try:
                 hl_state = await self.exchange.hl_client.get_account_state()
                 dydx_pos = await self.exchange.venue2_client.get_positions()
+                hl_real_positions = [
+                    p.get("position")
+                    for p in hl_state.get("assetPositions", [])
+                    if float(p.get("position", {}).get("szi", 0.0)) != 0.0
+                ] if isinstance(hl_state, dict) else []
                 diag["live_exchange"] = {
                     "is_live": True,
                     "active_internal_positions": len(getattr(self.exchange, "active_positions", {})),
-                    "hl_real_open_positions": len(hl_state.get("assetPositions", [])) if isinstance(hl_state, dict) else 0,
+                    "hl_real_open_positions": len(hl_real_positions),
+                    "hl_open_positions_detail": hl_real_positions,
                     "dydx_real_open_positions": len(dydx_pos) if isinstance(dydx_pos, list) else 0,
+                    "dydx_open_positions_detail": dydx_pos if isinstance(dydx_pos, list) else [],
                 }
             except Exception as le:
                 diag["live_exchange"] = {"is_live": True, "error": str(le)}
