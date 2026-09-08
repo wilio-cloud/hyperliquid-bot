@@ -1055,6 +1055,12 @@ class WebDashboardServer:
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     url = "https://api.hyperliquid.xyz/info"
                     payload = {"type": "clearinghouseState", "user": wallet_addr}
+                    spot_payload = {"type": "spotClearinghouseState", "user": wallet_addr}
+                    account_val = 0.0
+                    withdrawable = 0.0
+                    open_pos_count = 0
+                    spot_val = 0.0
+                    
                     async with session.post(url, json=payload) as resp:
                         if resp.status == 200:
                             data = await resp.json()
@@ -1063,19 +1069,25 @@ class WebDashboardServer:
                             withdrawable = float(data.get("withdrawable", 0.0))
                             positions = data.get("assetPositions", [])
                             open_pos_count = sum(1 for p in positions if float(p.get("position", {}).get("szi", 0.0)) != 0.0)
-                            diag["hyperliquid"] = {
-                                "status": "CONNECTED",
-                                "account_value_usd": round(account_val, 2),
-                                "withdrawable_usd": round(withdrawable, 2),
-                                "open_positions_count": open_pos_count,
-                                "agent_key_configured": bool(hl_key),
-                            }
-                        else:
-                            diag["hyperliquid"] = {
-                                "status": "ERROR",
-                                "http_code": resp.status,
-                                "error": await resp.text(),
-                            }
+
+                    async with session.post(url, json=spot_payload) as resp_spot:
+                        if resp_spot.status == 200:
+                            data_spot = await resp_spot.json()
+                            for b in data_spot.get("balances", []):
+                                if b.get("coin") == "USDC":
+                                    spot_val = float(b.get("total", 0.0))
+                                    break
+
+                    total_hl = account_val + spot_val
+                    diag["hyperliquid"] = {
+                        "status": "CONNECTED",
+                        "account_value_usd": round(total_hl, 2),
+                        "perps_margin_usd": round(account_val, 2),
+                        "spot_usdc_usd": round(spot_val, 2),
+                        "withdrawable_usd": round(withdrawable, 2),
+                        "open_positions_count": open_pos_count,
+                        "agent_key_configured": bool(hl_key),
+                    }
             except Exception as e:
                 diag["hyperliquid"] = {"status": "ERROR", "error": str(e)}
         else:
@@ -1086,9 +1098,10 @@ class WebDashboardServer:
             try:
                 import aiohttp
                 timeout = aiohttp.ClientTimeout(total=8.0)
+                headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", "Accept": "application/json"}
                 async with aiohttp.ClientSession(timeout=timeout) as session:
-                    url = f"https://indexer.dydx.trade/v4/subaccounts/{dydx_addr}/0"
-                    async with session.get(url) as resp:
+                    url = f"https://indexer.dydx.trade/v4/addresses/{dydx_addr}/subaccountNumber/0"
+                    async with session.get(url, headers=headers) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             sub = data.get("subaccount", {})
@@ -1105,7 +1118,7 @@ class WebDashboardServer:
                         elif resp.status == 404:
                             diag["dydx"] = {
                                 "status": "NOT_INITIALIZED_OR_EMPTY",
-                                "message": f"Subcompte 0 no trobat a dYdX Indexer. Assegura't d'haver completat el primer dipòsit a dYdX per a {dydx_addr}.",
+                                "message": f"Subcompte 0 no trobat a dYdX Indexer per a {dydx_addr}.",
                             }
                         else:
                             diag["dydx"] = {
