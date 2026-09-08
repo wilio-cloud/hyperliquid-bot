@@ -1001,12 +1001,16 @@ class WebDashboardServer:
     async def handle_logs(self, request):
         log_file = "trading_bot.log"
         lines = []
+        n_lines = min(int(request.query.get("n", "200")), 5000)
+        query = request.query.get("q", "").lower()
         if os.path.exists(log_file):
             try:
                 with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
                     all_lines = f.readlines()
-                    filtered = [l for l in all_lines if "GET /api/status" not in l]
-                    lines = (filtered or all_lines)[-150:]
+                    filtered = [l for l in all_lines if "GET /api/" not in l]
+                    if query:
+                        filtered = [l for l in filtered if query in l.lower()]
+                    lines = (filtered or all_lines)[-n_lines:]
             except Exception as e:
                 lines = [f"Error llegint logs: {e}\n"]
         else:
