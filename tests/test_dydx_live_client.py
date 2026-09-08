@@ -288,9 +288,9 @@ def test_adaptive_max_book_spread_for_dydx():
     import os
     from main import ArbitrageTradingBotApp
 
-    # Per defecte a dYdX ha de ser 0.500%
+    # Per defecte a dYdX ha de ser 1.200%
     app_dydx = ArbitrageTradingBotApp(coins=["SOL"], venue2="dydx", headless=True)
-    assert app_dydx.strategy.max_book_spread_pct == 0.500
+    assert app_dydx.strategy.max_book_spread_pct == 1.200
 
     # Per defecte a Aevo ha de ser 0.220%
     app_aevo = ArbitrageTradingBotApp(coins=["SOL"], venue2="aevo", headless=True)

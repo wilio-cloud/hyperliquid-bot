@@ -92,7 +92,7 @@ class ArbitrageTradingBotApp:
             if env_book_spread:
                 max_book_spread = float(env_book_spread)
             else:
-                max_book_spread = 0.500 if self.venue2 == "dydx" else 0.220
+                max_book_spread = 1.200 if self.venue2 == "dydx" else 0.220
 
         self.size_usd = size_usd
         self.headless = headless
@@ -849,7 +849,7 @@ def main():
     exit_spread_default = float(os.environ.get("EXIT_SPREAD", "0.010"))
     max_positions_default = int(os.environ.get("MAX_POSITIONS", "6"))
     venue2_default = os.environ.get("VENUE2", "aevo").lower()
-    default_book_spread = "0.500" if venue2_default == "dydx" else "0.220"
+    default_book_spread = "1.200" if venue2_default == "dydx" else "0.220"
     max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", default_book_spread))
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
     leverage_default = float(os.environ.get("LEVERAGE", "2.0"))
