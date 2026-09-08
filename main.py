@@ -876,7 +876,7 @@ def main():
     parser.add_argument("--min-profit", type=float, default=min_profit_default, help="Benefici net mínim permès per trade tancat (default: 0.10$)")
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
     parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 4)")
-    parser.add_argument("--max-book-spread", type=float, default=None, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.500% per a dYdX, 0.220% per a Aevo/altres)")
+    parser.add_argument("--max-book-spread", type=float, default=None, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.500%% per a dYdX, 0.220%% per a Aevo/altres)")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
     parser.add_argument("--live", action="store_true", help="Activar mode d'execució en real a Hyperliquid i Aevo")
