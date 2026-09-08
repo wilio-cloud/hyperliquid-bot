@@ -1005,7 +1005,8 @@ class WebDashboardServer:
             try:
                 with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
                     all_lines = f.readlines()
-                    lines = all_lines[-150:]
+                    filtered = [l for l in all_lines if "GET /api/status" not in l]
+                    lines = (filtered or all_lines)[-150:]
             except Exception as e:
                 lines = [f"Error llegint logs: {e}\n"]
         else:
@@ -1013,18 +1014,142 @@ class WebDashboardServer:
         return web.Response(text="".join(lines), content_type="text/plain")
 
     async def handle_diag(self, request):
-        diag = {}
-        try:
-            if hasattr(self.exchange, "aevo_client"):
-                diag["aevo_account"] = await self.exchange.aevo_client.get_account()
-                diag["aevo_portfolio"] = await self.exchange.aevo_client.get_account_state()
-                diag["aevo_positions"] = await self.exchange.aevo_client.get_positions()
-                diag["aevo_orders"] = await self.exchange.aevo_client.get_open_orders()
-            if hasattr(self.exchange, "hl_client"):
-                diag["hl_account"] = await self.exchange.hl_client.get_account_state()
-                diag["hl_orders"] = await self.exchange.hl_client.get_open_orders()
-        except Exception as e:
-            diag["error"] = str(e)
+        diag = {
+            "timestamp": time.time(),
+            "env_configured": {},
+            "hyperliquid": {},
+            "dydx": {},
+            "live_exchange": {},
+            "ready_for_live": False,
+            "checklist": [],
+        }
+
+        wallet_addr = os.getenv("WALLET_ADDRESS", "").strip()
+        hl_key = (os.getenv("HL_AGENT_PRIVATE_KEY") or os.getenv("PRIVATE_KEY") or "").strip()
+        dydx_addr = os.getenv("DYDX_ADDRESS", "").strip()
+        dydx_mnemonic = (os.getenv("DYDX_MNEMONIC") or "").strip()
+        dydx_pk = (os.getenv("DYDX_PRIVATE_KEY") or os.getenv("DYDX_PRIVATE") or "").strip()
+        exec_mode = os.getenv("EXECUTION_MODE", "paper").strip().lower()
+        venue2 = os.getenv("VENUE2", "dydx").strip().lower()
+
+        # Resum de variables d'entorn (emmascarades per seguretat)
+        diag["env_configured"] = {
+            "execution_mode": exec_mode,
+            "venue2": venue2,
+            "has_wallet_address": bool(wallet_addr),
+            "wallet_address_masked": f"{wallet_addr[:6]}...{wallet_addr[-4:]}" if len(wallet_addr) >= 10 else ("configured" if wallet_addr else "missing"),
+            "has_hl_agent_key": bool(hl_key),
+            "hl_agent_key_len": len(hl_key) if hl_key else 0,
+            "has_dydx_address": bool(dydx_addr),
+            "dydx_address_masked": f"{dydx_addr[:8]}...{dydx_addr[-4:]}" if len(dydx_addr) >= 12 else ("configured" if dydx_addr else "missing"),
+            "has_dydx_mnemonic": bool(dydx_mnemonic),
+            "dydx_mnemonic_word_count": len(dydx_mnemonic.split()) if dydx_mnemonic else 0,
+            "has_dydx_private_key": bool(dydx_pk),
+        }
+
+        # 1. Prova de connexió amb Hyperliquid API
+        if wallet_addr:
+            try:
+                import aiohttp
+                timeout = aiohttp.ClientTimeout(total=8.0)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    url = "https://api.hyperliquid.xyz/info"
+                    payload = {"type": "clearinghouseState", "user": wallet_addr}
+                    async with session.post(url, json=payload) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            ms = data.get("marginSummary", {})
+                            account_val = float(ms.get("accountValue", 0.0))
+                            withdrawable = float(data.get("withdrawable", 0.0))
+                            positions = data.get("assetPositions", [])
+                            open_pos_count = sum(1 for p in positions if float(p.get("position", {}).get("szi", 0.0)) != 0.0)
+                            diag["hyperliquid"] = {
+                                "status": "CONNECTED",
+                                "account_value_usd": round(account_val, 2),
+                                "withdrawable_usd": round(withdrawable, 2),
+                                "open_positions_count": open_pos_count,
+                                "agent_key_configured": bool(hl_key),
+                            }
+                        else:
+                            diag["hyperliquid"] = {
+                                "status": "ERROR",
+                                "http_code": resp.status,
+                                "error": await resp.text(),
+                            }
+            except Exception as e:
+                diag["hyperliquid"] = {"status": "ERROR", "error": str(e)}
+        else:
+            diag["hyperliquid"] = {"status": "NOT_CONFIGURED", "message": "WALLET_ADDRESS no establerta a les variables d'entorn."}
+
+        # 2. Prova de connexió amb dYdX v4 Indexer API
+        if dydx_addr:
+            try:
+                import aiohttp
+                timeout = aiohttp.ClientTimeout(total=8.0)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    url = f"https://indexer.dydx.trade/v4/subaccounts/{dydx_addr}/0"
+                    async with session.get(url) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            sub = data.get("subaccount", {})
+                            equity = float(sub.get("equity") or 0.0)
+                            free_col = float(sub.get("freeCollateral") or 0.0)
+                            open_pos = sub.get("openPerpetualPositions", {})
+                            diag["dydx"] = {
+                                "status": "CONNECTED",
+                                "equity_usd": round(equity, 2),
+                                "free_collateral_usd": round(free_col, 2),
+                                "open_positions_count": len(open_pos),
+                                "credentials_configured": bool(dydx_mnemonic or dydx_pk),
+                            }
+                        elif resp.status == 404:
+                            diag["dydx"] = {
+                                "status": "NOT_INITIALIZED_OR_EMPTY",
+                                "message": f"Subcompte 0 no trobat a dYdX Indexer. Assegura't d'haver completat el primer dipòsit a dYdX per a {dydx_addr}.",
+                            }
+                        else:
+                            diag["dydx"] = {
+                                "status": "ERROR",
+                                "http_code": resp.status,
+                                "error": await resp.text(),
+                            }
+            except Exception as e:
+                diag["dydx"] = {"status": "ERROR", "error": str(e)}
+        else:
+            diag["dydx"] = {"status": "NOT_CONFIGURED", "message": "DYDX_ADDRESS no establerta a les variables d'entorn."}
+
+        # 3. Diagnòstic de l'Exchange en Viu (si ja està en mode live)
+        if hasattr(self.exchange, "hl_client") and hasattr(self.exchange, "venue2_client"):
+            try:
+                hl_state = await self.exchange.hl_client.get_account_state()
+                dydx_pos = await self.exchange.venue2_client.get_positions()
+                diag["live_exchange"] = {
+                    "is_live": True,
+                    "active_internal_positions": len(getattr(self.exchange, "active_positions", {})),
+                    "hl_real_open_positions": len(hl_state.get("assetPositions", [])) if isinstance(hl_state, dict) else 0,
+                    "dydx_real_open_positions": len(dydx_pos) if isinstance(dydx_pos, list) else 0,
+                }
+            except Exception as le:
+                diag["live_exchange"] = {"is_live": True, "error": str(le)}
+        else:
+            diag["live_exchange"] = {"is_live": False, "note": "El bot està corrent en mode simulació (Paper)."}
+
+        # 4. Checklist de Preparació per a Trading Real
+        hl_ok = diag["hyperliquid"].get("status") == "CONNECTED" and bool(hl_key)
+        dydx_ok = diag["dydx"].get("status") == "CONNECTED" and bool(dydx_mnemonic or dydx_pk)
+        has_hl_funds = diag["hyperliquid"].get("account_value_usd", 0.0) >= 10.0
+        has_dydx_funds = diag["dydx"].get("free_collateral_usd", 0.0) >= 10.0
+
+        checklist = [
+            f"Hyperliquid API: {'✅ CONNECTAT' if hl_ok else '❌ FALTA O ERROR'}",
+            f"Hyperliquid Fons: {'✅ $' + str(diag['hyperliquid'].get('account_value_usd', 0)) if has_hl_funds else '⚠️ Menys de 10$ USDC'}",
+            f"dYdX v4 API: {'✅ CONNECTAT' if dydx_ok else '❌ FALTA O ERROR'}",
+            f"dYdX Fons: {'✅ $' + str(diag['dydx'].get('free_collateral_usd', 0)) if has_dydx_funds else '⚠️ Menys de 10$ USDC'}",
+            f"Mode d'Execució a Railway: {'⚡ LIVE (REAL)' if exec_mode == 'live' else '📄 PAPER (SIMULACIÓ)'}",
+        ]
+        diag["checklist"] = checklist
+        diag["ready_for_live"] = hl_ok and dydx_ok and has_hl_funds and has_dydx_funds
+
         return web.json_response(diag)
 
     async def handle_close_all(self, request):
