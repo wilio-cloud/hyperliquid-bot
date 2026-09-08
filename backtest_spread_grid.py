@@ -202,9 +202,8 @@ class ArbitrageGridBacktest:
                 if pos.coin == coin:
                     exit_res = strat.check_exit(pos)
                     if exit_res:
-                        reason, hl_px, bn_px = exit_res
-                        is_maker = reason in ("CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET", "TIME_BREAKEVEN", "TIME_QUICK_PROFIT")
-                        exchange.close_arbitrage_position(pos.pair_id, hl_px, bn_px, reason, is_maker=is_maker)
+                        # Sortides reals executades per Taker IOC
+                        exchange.close_arbitrage_position(pos.pair_id, hl_px, bn_px, reason, is_maker=False)
                         cooldowns[coin] = ev.timestamp + 45.0
 
             # Entrades
