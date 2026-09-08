@@ -56,21 +56,23 @@ class DydxV4WSClient:
         self.is_running = False
         self._ws_task: Optional[asyncio.Task] = None
         self._funding_task: Optional[asyncio.Task] = None
+        self._resync_task: Optional[asyncio.Task] = None
         self._ssl_context = get_ssl_context()
 
         self.ws_url = "wss://indexer.dydx.trade/v4/ws"
         self.rest_url = "https://indexer.dydx.trade/v4/perpetualMarkets"
 
     async def start(self):
-        """Inicia la connexió WebSocket i el polling de funding de dYdX v4."""
+        """Inicia la connexió WebSocket, el polling de funding i el resync periòdic de llibres."""
         self.is_running = True
         self._ws_task = asyncio.create_task(self._run_ws_loop())
         self._funding_task = asyncio.create_task(self._run_funding_poll_loop())
+        self._resync_task = asyncio.create_task(self._run_orderbook_resync_loop())
 
     async def stop(self):
         """Atura el client de dYdX."""
         self.is_running = False
-        for task in (self._ws_task, self._funding_task):
+        for task in (self._ws_task, self._funding_task, self._resync_task):
             if task:
                 task.cancel()
                 try:
@@ -196,9 +198,17 @@ class DydxV4WSClient:
         best_bid = max(bids_dict.keys())
         best_ask = min(asks_dict.keys())
 
-        # Si el llibre està creuat momentàniament, prenem el mid
-        if best_bid > best_ask:
-            best_bid, best_ask = best_ask, best_bid
+        # Si el llibre està creuat (ordres fantasma per deltas desincronitzats), purguem nivells inconsistents
+        if best_bid >= best_ask:
+            # Elimina asks residuals menors o iguals que el millor bid, i bids majors o iguals que el millor ask
+            asks_dict = {p: s for p, s in asks_dict.items() if p > best_bid}
+            bids_dict = {p: s for p, s in bids_dict.items() if p < best_ask}
+            self._raw_bids[coin] = bids_dict
+            self._raw_asks[coin] = asks_dict
+            if not bids_dict or not asks_dict:
+                return
+            best_bid = max(bids_dict.keys())
+            best_ask = min(asks_dict.keys())
 
         bid_qty = bids_dict.get(best_bid, 1.0)
         ask_qty = asks_dict.get(best_ask, 1.0)
@@ -213,6 +223,46 @@ class DydxV4WSClient:
 
         if self.on_book_update:
             self.on_book_update(order_book)
+
+    async def _run_orderbook_resync_loop(self):
+        """
+        Refresca periòdicament (cada 60s) els llibres d'ordres complets via REST oficial de dYdX.
+        Evita qualsevol acumulació d'ordres fantasma en memòria a llarg termini.
+        """
+        await asyncio.sleep(10.0)  # Breu pausa inicial per deixar que el WS connecti primer
+        while self.is_running:
+            try:
+                connector = aiohttp.TCPConnector(ssl=self._ssl_context)
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    headers = {"User-Agent": "Mozilla/5.0"}
+
+                    async def _fetch_market_snapshot(coin: str):
+                        market_id = self.symbol_map.get(coin)
+                        if not market_id:
+                            return
+                        url = f"https://indexer.dydx.trade/v4/orderbooks/perpetualMarket/{market_id}"
+                        try:
+                            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=5.0)) as resp:
+                                if resp.status == 200:
+                                    data = await resp.json()
+                                    bids_raw = data.get("bids", [])
+                                    asks_raw = data.get("asks", [])
+                                    if bids_raw and asks_raw:
+                                        new_bids = {float(b["price"]): float(b["size"]) for b in bids_raw if float(b.get("size", 0)) > 0}
+                                        new_asks = {float(a["price"]): float(a["size"]) for a in asks_raw if float(a.get("size", 0)) > 0}
+                                        self._raw_bids[coin] = new_bids
+                                        self._raw_asks[coin] = new_asks
+                                        self._emit_orderbook(coin, time.time())
+                        except Exception as e:
+                            logger.debug(f"Error resync REST per {coin}: {e}")
+
+                    await asyncio.gather(*[_fetch_market_snapshot(c) for c in self.coins])
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Error en bucle de resync de llibres dYdX: {e}")
+
+            await asyncio.sleep(60.0)
 
     async def _run_funding_poll_loop(self):
         """Consulta periòdica de Funding Rates oficials de dYdX cada 20 segons."""
