@@ -348,13 +348,26 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
             # 2. PAS A: Enviament de la pota primària (Hyperliquid Alo si Maker-First, o IOC si Taker)
             use_post_only = is_maker or effective_maker_first
-            logger.info(f"Enviant pota primària a Hyperliquid per a {coin} (PostOnly={use_post_only})...")
+
+            # Determinació del preu d'execució:
+            # - En mode Maker (Post-Only): Comprem al BID i venem a l'ASK per descansar al llibre com a Maker (sense creuar).
+            # - En mode Taker (IOC): Comprem a l'ASK i venem al BID per omplir immediatament.
+            hl_book = self._last_hl_books.get(coin)
+            if use_post_only and hl_book and hl_book.best_bid and hl_book.best_ask:
+                hl_order_price = hl_book.best_bid if hl_is_buy else hl_book.best_ask
+            else:
+                hl_order_price = signal.hl_price
+
+            logger.info(
+                f"Enviant pota primària a Hyperliquid per a {coin} "
+                f"({'BUY' if hl_is_buy else 'SELL'} @ {hl_order_price}, PostOnly={use_post_only})..."
+            )
             try:
                 hl_res = await self.hl_client.place_order(
                     coin=coin,
                     is_buy=hl_is_buy,
                     size=hl_sz,
-                    price=signal.hl_price,
+                    price=hl_order_price,
                     post_only=use_post_only,
                     ioc=not use_post_only,
                 )
