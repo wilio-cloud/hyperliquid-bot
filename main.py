@@ -31,6 +31,7 @@ from core.web_server import WebDashboardServer
 from core.ws_client import HyperliquidWSClient
 from strategies.base_strategy import BaseStrategy
 from strategies.cross_arbitrage import CrossExchangeArbitrageStrategy
+from strategies.funding_carry import FundingCarryStrategy
 from strategies.micro_mean_reversion import MicroMeanReversionStrategy
 from strategies.orderbook_imbalance import OrderBookImbalanceStrategy
 from strategies.spread_scalper import SpreadMarketMakerStrategy
@@ -73,9 +74,19 @@ class ArbitrageTradingBotApp:
         execution_mode: str = "paper",
         maker_first: bool = False,
         port: int = 8080,
+        strategy_mode: str = "arbitrage",
+        enable_carry: bool = False,
+        min_carry_apr: float = 16.0,
+        min_exit_apr: float = 4.0,
+        carry_slots: int = 2,
     ):
         self.coins = coins
         self.port = port
+        self.strategy_mode = strategy_mode.lower()
+        self.enable_carry = enable_carry or (self.strategy_mode == "funding_carry")
+        self.min_carry_apr = min_carry_apr
+        self.min_exit_apr = min_exit_apr
+        self.carry_slots = carry_slots
         self.venue2 = venue2.lower()
         self.maker_first = maker_first
         if self.venue2 == "aevo":
@@ -213,6 +224,12 @@ class ArbitrageTradingBotApp:
             max_book_spread_pct=max_book_spread,
             maker_first=self.maker_first,
         )
+        self.carry_strategy = FundingCarryStrategy(
+            min_entry_apr=self.min_carry_apr,
+            min_exit_apr=self.min_exit_apr,
+            max_book_spread_pct=max_book_spread,
+            maker_first=self.maker_first,
+        )
         self.hl_ws = HyperliquidWSClient(
             coins=self.coins,
             on_book_update=self.handle_hl_book,
@@ -292,22 +309,28 @@ class ArbitrageTradingBotApp:
 
     def handle_hl_book(self, book: OrderBookL2):
         self.strategy.update_hl_book(book)
+        self.carry_strategy.update_hl_book(book)
         self.exchange.on_hl_book(book)
         self._check_coin_state(book.coin)
 
     def handle_venue2_book(self, book: OrderBookL2):
         self.strategy.update_bn_book(book)
+        self.carry_strategy.update_bn_book(book)
         self.exchange.on_bn_book(book)
         self._check_coin_state(book.coin)
 
     def handle_venue2_funding(self, funding_dict: Dict[str, float]):
         self.strategy.update_bn_funding(funding_dict)
+        self.carry_strategy.update_bn_funding(funding_dict)
 
     def _check_coin_state(self, coin: str):
         # 1. Comprova tancaments de posicions obertes
         for pos in list(self.exchange.active_positions.values()):
             if pos.coin == coin:
-                exit_eval = self.strategy.check_exit(pos)
+                if getattr(pos, "strategy_type", "SPREAD_SCALP") == "FUNDING_CARRY":
+                    exit_eval = self.carry_strategy.check_exit(pos)
+                else:
+                    exit_eval = self.strategy.check_exit(pos)
                 if exit_eval:
                     reason, hl_px, bn_px = exit_eval
                     # En tancaments reals, per seguretat atòmica d'execució i evitar resting orders penjades,
@@ -326,7 +349,19 @@ class ArbitrageTradingBotApp:
 
         # 3. Avalua noves oportunitats d'entrada si no tenim posició en aquest parell
         if not self.exchange.has_open_position(coin) and len(self.exchange.active_positions) < self.max_positions:
-            sig = self.strategy.evaluate_entry(coin)
+            sig = None
+            if self.strategy_mode == "funding_carry":
+                sig = self.carry_strategy.evaluate_entry(coin)
+            else:
+                sig = self.strategy.evaluate_entry(coin)
+                if not sig and self.enable_carry:
+                    carry_count = sum(
+                        1 for p in self.exchange.active_positions.values()
+                        if getattr(p, "strategy_type", "SPREAD_SCALP") == "FUNDING_CARRY"
+                    )
+                    if carry_count < self.carry_slots:
+                        sig = self.carry_strategy.evaluate_entry(coin)
+
             if sig:
                 order_sz = self.calculate_order_size()
                 self.exchange.open_arbitrage_position(sig, size_usd=order_sz, is_maker=False)
@@ -351,6 +386,7 @@ class ArbitrageTradingBotApp:
                                 if c in self.coins:
                                     funding_h = float(asset_ctxs[i]["funding"]) * 100.0
                                     self.strategy.update_hl_funding(c, funding_h)
+                                    self.carry_strategy.update_hl_funding(c, funding_h)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -435,6 +471,7 @@ class ArbitrageTradingBotApp:
                     "entry_price": p.leg_bn.entry_price,
                     "size_usd": p.leg_bn.size_usd,
                 },
+                "strategy_type": getattr(p, "strategy_type", "SPREAD_SCALP"),
             }
             for p in self.exchange.active_positions.values()
         ]
@@ -447,6 +484,7 @@ class ArbitrageTradingBotApp:
                 "accumulated_funding": p.accumulated_funding,
                 "total_fees": p.total_fees,
                 "realized_pnl": p.realized_pnl,
+                "strategy_type": getattr(p, "strategy_type", "SPREAD_SCALP"),
             }
             for p in self.exchange.closed_positions[-35:]
         ]
@@ -860,7 +898,7 @@ def main():
     max_size_default = float(os.environ.get("MAX_SIZE", "2500.0"))
 
     parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + Aevo / Vertex / dYdX / Binance)")
-    parser.add_argument("--mode", choices=["arbitrage", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (recomanat) o 'scalper'")
+    parser.add_argument("--mode", choices=["arbitrage", "funding_carry", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (spread scalping), 'funding_carry' (carry trade passiu de funding), o 'scalper'")
     parser.add_argument("--venue2", choices=["aevo", "vertex", "dydx", "binance"], default=venue2_default, help="Segon exchange per a l'arbitratge: 'aevo' (DEX d'alta freqüència), 'vertex' (0%% Maker Fee), 'dydx' o 'binance'")
     parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL)")
     parser.add_argument("--maker-first", action="store_true", default=os.getenv("MAKER_FIRST", "false").lower() in ("true", "1", "yes"), help="Activar execució Maker-First a Hyperliquid per minimitzar comissions d'arbitratge")
@@ -878,6 +916,10 @@ def main():
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
     parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 4)")
     parser.add_argument("--max-book-spread", type=float, default=None, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.500%% per a dYdX, 0.220%% per a Aevo/altres)")
+    parser.add_argument("--min-carry-apr", type=float, default=float(os.environ.get("MIN_CARRY_APR", "16.0")), help="APR mínim per entrar en Funding Carry Trade (default: 16.0%%)")
+    parser.add_argument("--min-exit-apr", type=float, default=float(os.environ.get("MIN_EXIT_APR", "4.0")), help="APR mínim per sortir de Funding Carry per compressió (default: 4.0%%)")
+    parser.add_argument("--enable-carry", action="store_true", default=os.getenv("ENABLE_CARRY", "false").lower() in ("true", "1", "yes"), help="Habilitar entrades híbrides de Funding Carry dins el mode d'arbitratge")
+    parser.add_argument("--carry-slots", type=int, default=int(os.environ.get("CARRY_SLOTS", "2")), help="Ranures màximes reservades per a carry trade en mode híbrid (default: 2)")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
     parser.add_argument("--live", action="store_true", help="Activar mode d'execució en real a Hyperliquid i Aevo")
@@ -889,7 +931,7 @@ def main():
 
     execution_mode = "live" if (args.live or args.execution_mode == "live") else "paper"
 
-    if args.mode == "arbitrage":
+    if args.mode in ("arbitrage", "funding_carry"):
         env_coins = os.getenv("COINS")
         if args.coins:
             coins = args.coins
@@ -930,6 +972,11 @@ def main():
             execution_mode=execution_mode,
             maker_first=args.maker_first,
             port=args.port,
+            strategy_mode=args.mode,
+            enable_carry=args.enable_carry,
+            min_carry_apr=args.min_carry_apr,
+            min_exit_apr=args.min_exit_apr,
+            carry_slots=args.carry_slots,
         )
     else:
         coins = args.coins or ["BTC"]

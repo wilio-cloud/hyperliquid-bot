@@ -305,8 +305,8 @@ class CrossExchangeArbitrageStrategy:
             bn_gross = (bn_exit_px - pos.leg_bn.entry_price) * pos.leg_bn.size
             
             venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
-            venue2_fee_rate = 0.00050 if "AEVO" in venue2_name else 0.00040  # Taker real Aevo 0.050%
-            hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00035  # Taker IOC exit 0.035%
+            venue2_fee_rate = 0.00050 if ("AEVO" in venue2_name or "DYDX" in venue2_name) else 0.00040  # Taker real Aevo/dYdX 0.050%
+            hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00045  # Taker IOC exit 0.045% (o 0.043% amb referit)
             bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_fee_rate
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
@@ -351,8 +351,8 @@ class CrossExchangeArbitrageStrategy:
             bn_gross = (pos.leg_bn.entry_price - bn_exit_px) * pos.leg_bn.size
             
             venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
-            venue2_fee_rate = 0.00050 if "AEVO" in venue2_name else 0.00040
-            hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00035  # Taker IOC exit 0.035%
+            venue2_fee_rate = 0.00050 if ("AEVO" in venue2_name or "DYDX" in venue2_name) else 0.00040
+            hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00045  # Taker IOC exit 0.045% (o 0.043% amb referit)
             bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_fee_rate
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
@@ -392,8 +392,8 @@ class CrossExchangeArbitrageStrategy:
         if pos_age >= 1800.0 and projected_net_pnl >= 0.08:
             return ("TIME_BREAKEVEN", hl_exit_px, bn_exit_px)
 
-        # C) Si porta > 45 minuts (2700s) i el PnL net cobreix totes les comissions (>= +0.02$), allibera ranura
-        if pos_age >= 2700.0 and projected_net_pnl >= 0.02:
+        # C) Si porta > 45 minuts (2700s) i el PnL net cobreix amb escreix totes les comissions reals (>= +0.04$), allibera ranura
+        if pos_age >= 2700.0 and projected_net_pnl >= 0.04:
             return ("TIME_SLOT_FREE", hl_exit_px, bn_exit_px)
 
         return None

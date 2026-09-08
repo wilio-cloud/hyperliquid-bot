@@ -195,6 +195,8 @@ class ArbitragePaperExchange:
             entry_spread_pct=signal.spread_pct,
             entry_time=time.time(),
             current_spread_pct=signal.spread_pct,
+            strategy_type=getattr(signal, "strategy_type", "SPREAD_SCALP"),
+            current_net_apr=getattr(signal, "net_funding_apr", 0.0),
         )
         position.update_pnl()
         self.active_positions[pair_id] = position
@@ -263,6 +265,7 @@ class ArbitragePaperExchange:
 
             net_hour_funding = hl_payment + bn_payment
             pos.accumulated_funding += net_hour_funding
+            pos.funding_payouts_count += 1
             self.total_funding_collected += net_hour_funding
 
             self.hl_balance_usd += hl_payment

@@ -812,8 +812,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         const bnPx = (p.leg_bn && p.leg_bn.entry_price) ? p.leg_bn.entry_price.toFixed(2) : '-';
                         const bnSz = (p.leg_bn && p.leg_bn.size_usd) ? p.leg_bn.size_usd.toFixed(0) : '-';
 
+                        const carryBadge = (p.strategy_type === 'FUNDING_CARRY') ? ' <span style="font-size: 0.65rem; background: #8b5cf6; color: #fff; padding: 2px 5px; border-radius: 4px; vertical-align: middle;">CARRY</span>' : '';
                         return `<tr>
-                            <td style="font-weight: bold; color: #facc15;">${p.coin}</td>
+                            <td style="font-weight: bold; color: #facc15;">${p.coin}${carryBadge}</td>
                             <td style="font-weight: bold; color: #38bdf8;">${p.direction}</td>
                             <td>${hlSide} @ ${hlPx} (${hlSz}$)</td>
                             <td>${bnSide} @ ${bnPx} (${bnSz}$)</td>
@@ -966,6 +967,8 @@ class WebDashboardServer:
                             "entry_price": p.leg_bn.entry_price,
                             "size_usd": p.leg_bn.size_usd,
                         },
+                        "strategy_type": getattr(p, "strategy_type", "SPREAD_SCALP"),
+                        "current_net_apr": getattr(p, "current_net_apr", 0.0),
                     }
                     for p in self.exchange.active_positions.values()
                 ]
@@ -978,6 +981,7 @@ class WebDashboardServer:
                         "accumulated_funding": p.accumulated_funding,
                         "total_fees": p.total_fees,
                         "realized_pnl": p.realized_pnl,
+                        "strategy_type": getattr(p, "strategy_type", "SPREAD_SCALP"),
                     }
                     for p in self.exchange.closed_positions[-35:]
                 ]

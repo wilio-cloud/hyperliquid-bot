@@ -19,6 +19,7 @@ class ArbitrageSignal(BaseModel):
     hl_funding_8h_pct: float = 0.0
     bn_funding_8h_pct: float = 0.0
     net_funding_apr: float = 0.0
+    strategy_type: str = "SPREAD_SCALP"  # "SPREAD_SCALP" o "FUNDING_CARRY"
     reason: str = ""
     timestamp: float = Field(default_factory=time.time)
 
@@ -75,6 +76,9 @@ class ArbitragePosition(BaseModel):
     exit_time: Optional[float] = None
     exit_reason: Optional[str] = None
     divergence_start_time: Optional[float] = None
+    strategy_type: str = "SPREAD_SCALP"  # "SPREAD_SCALP" o "FUNDING_CARRY"
+    current_net_apr: float = 0.0
+    funding_payouts_count: int = 0
 
     def update_pnl(self):
         """Actualitza el PnL combinat de totes dues potes i afegeix funding."""
