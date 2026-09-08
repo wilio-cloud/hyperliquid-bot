@@ -206,6 +206,8 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 f"Aevo = {self.bn_balance_usd:.2f}$ | Total = {self.total_balance_usd:.2f}$"
             )
             await self.reconcile_active_positions()
+            if self.hl_client.referral_code:
+                await self.hl_client.apply_referral_code()
             self.save_state()
         except Exception as e:
             logger.error(f"Error sincronitzant saldos reals: {e}")
