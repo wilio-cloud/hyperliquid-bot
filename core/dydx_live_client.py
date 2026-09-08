@@ -103,12 +103,25 @@ class DydxLiveClient:
         self._is_initialized = False
 
         # Si tenim credencials i no tenim adreça, deduïm l'adreça de la clau
-        if not self.address and (self.mnemonic or self.private_key):
-            self.address = self._derive_address()
+        self.derived_address = self._derive_address()
+        if not self.address and self.derived_address:
+            self.address = self.derived_address
+
+        self.credential_mismatch = False
+        self.credential_mismatch_reason = ""
+        if self.address and self.derived_address and self.address.lower() != self.derived_address.lower():
+            self.credential_mismatch = True
+            self.credential_mismatch_reason = (
+                f"L'adreça DYDX_ADDRESS ({self.address}) no coincideix amb l'adreça derivada ({self.derived_address}). "
+                f"Si fas servir MetaMask a dYdX, cal exportar les 24 paraules ('Export secret phrase' a dYdX) "
+                f"i configurar-les a DYDX_MNEMONIC a Railway."
+            )
+            logger.error(f"🚨 [DYDX CREDENTIAL MISMATCH] {self.credential_mismatch_reason}")
 
         logger.info(
             f"DydxLiveClient creat per a address: {self.address or 'no especificada'} "
-            f"(subaccount={self.subaccount_number}, env={self.env})"
+            f"(derived={self.derived_address or 'none'}, mismatch={self.credential_mismatch}, "
+            f"subaccount={self.subaccount_number}, env={self.env})"
         )
 
     def _derive_address(self) -> str:
@@ -315,6 +328,14 @@ class DydxLiveClient:
 
         return positions
 
+    def is_ready_to_trade(self) -> Tuple[bool, str]:
+        """Comprova si el client dYdX té credencials vàlides i coherents abans d'executar ordres."""
+        if not self.mnemonic and not self.private_key:
+            return False, "Falten credencials dYdX (DYDX_MNEMONIC o DYDX_PRIVATE_KEY)"
+        if self.credential_mismatch:
+            return False, self.credential_mismatch_reason
+        return True, "OK"
+
     async def place_order(
         self,
         coin: str,
@@ -326,6 +347,11 @@ class DydxLiveClient:
         ioc: bool = False,
     ) -> Dict[str, Any]:
         """Envia una ordre signada a la xarxa dYdX v4."""
+        ready, reason = self.is_ready_to_trade()
+        if not ready:
+            logger.error(f"❌ Ordre dYdX avortada per seguretat: {reason}")
+            return {"status": "err", "error": reason}
+
         await self.initialize()
 
         if not self.wallet:

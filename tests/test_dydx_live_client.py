@@ -29,6 +29,25 @@ def test_dydx_live_client_hex_private_key_with_0x():
     assert client2.address.startswith("dydx1")
 
 
+def test_dydx_live_client_credential_mismatch_blocks_orders():
+    # Adreça explícita diferent de la derivada de la clau
+    raw_hex = "4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"
+    wrong_addr = "dydx1l2jsd970hrlg4ssf085eaz0flce32fjhagfk47"
+    client = DydxLiveClient(address=wrong_addr, private_key=raw_hex)
+    assert client.credential_mismatch is True
+    ready, reason = client.is_ready_to_trade()
+    assert ready is False
+    assert "Credential mismatch" in reason or "no coincideix" in reason
+
+    async def _test():
+        return await client.place_order(coin="SOL", is_buy=True, size=1.0, price=100.0)
+
+    res = asyncio.run(_test())
+    assert res.get("status") == "err"
+    assert "Credential mismatch" in res.get("error", "") or "no coincideix" in res.get("error", "")
+
+
+
 def test_dydx_live_client_rounding():
     client = DydxLiveClient()
 

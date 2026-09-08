@@ -1181,15 +1181,34 @@ class WebDashboardServer:
             diag["live_exchange"] = {"is_live": False, "note": "El bot està corrent en mode simulació (Paper)."}
 
         # 4. Checklist de Preparació per a Trading Real
+        dydx_ready = True
+        dydx_ready_reason = "OK"
+        if hasattr(self.exchange, "venue2_client") and hasattr(self.exchange.venue2_client, "is_ready_to_trade"):
+            dydx_ready, dydx_ready_reason = self.exchange.venue2_client.is_ready_to_trade()
+        elif dydx_addr and (dydx_mnemonic or dydx_pk):
+            try:
+                from core.dydx_live_client import DydxLiveClient
+                temp_dydx = DydxLiveClient(address=dydx_addr, mnemonic=dydx_mnemonic, private_key=dydx_pk)
+                dydx_ready, dydx_ready_reason = temp_dydx.is_ready_to_trade()
+            except Exception:
+                pass
+
+        if not dydx_ready:
+            diag["dydx"]["credentials_valid"] = False
+            diag["dydx"]["credentials_error"] = dydx_ready_reason
+        else:
+            diag["dydx"]["credentials_valid"] = True
+
         hl_ok = diag["hyperliquid"].get("status") == "CONNECTED" and bool(hl_key)
-        dydx_ok = diag["dydx"].get("status") == "CONNECTED" and bool(dydx_mnemonic or dydx_pk)
+        dydx_ok = diag["dydx"].get("status") == "CONNECTED" and bool(dydx_mnemonic or dydx_pk) and dydx_ready
         has_hl_funds = diag["hyperliquid"].get("account_value_usd", 0.0) >= 10.0
         has_dydx_funds = diag["dydx"].get("free_collateral_usd", 0.0) >= 10.0
 
         checklist = [
             f"Hyperliquid API: {'✅ CONNECTAT' if hl_ok else '❌ FALTA O ERROR'}",
             f"Hyperliquid Fons: {'✅ $' + str(diag['hyperliquid'].get('account_value_usd', 0)) if has_hl_funds else '⚠️ Menys de 10$ USDC'}",
-            f"dYdX v4 API: {'✅ CONNECTAT' if dydx_ok else '❌ FALTA O ERROR'}",
+            f"dYdX v4 API: {'✅ CONNECTAT' if diag['dydx'].get('status') == 'CONNECTED' else '❌ FALTA O ERROR'}",
+            f"dYdX v4 Credencials: {'✅ COHERENTS' if dydx_ready else '❌ ERROR CLAU (Cal DYDX_MNEMONIC de 24 paraules)'}",
             f"dYdX Fons: {'✅ $' + str(diag['dydx'].get('free_collateral_usd', 0)) if has_dydx_funds else '⚠️ Menys de 10$ USDC'}",
             f"Mode d'Execució a Railway: {'⚡ LIVE (REAL)' if exec_mode == 'live' else '📄 PAPER (SIMULACIÓ)'}",
         ]

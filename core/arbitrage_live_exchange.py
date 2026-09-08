@@ -346,6 +346,21 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                         )
                         return
 
+            # Pre-flight check de venue2: Assegurar que el segon exchange té credencials vàlides abans d'obrir a HL
+            if hasattr(self.aevo_client, "is_ready_to_trade"):
+                try:
+                    res = self.aevo_client.is_ready_to_trade()
+                    if isinstance(res, (tuple, list)) and len(res) == 2:
+                        ready, reason = res
+                        if not ready:
+                            logger.warning(
+                                f"🛡️ [BLOCAT PER SEGURETAT] {self.venue2_name} no està llest per operar: {reason}. "
+                                f"Avortant entrada a Hyperliquid per protegir capital."
+                            )
+                            return
+                except Exception as te:
+                    logger.debug(f"Error comprovant is_ready_to_trade: {te}")
+
             # 2. PAS A: Enviament de la pota primària (Hyperliquid Alo si Maker-First, o IOC si Taker)
             use_post_only = is_maker or effective_maker_first
 
