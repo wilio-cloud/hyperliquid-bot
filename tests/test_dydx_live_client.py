@@ -19,6 +19,16 @@ def test_dydx_live_client_address_derivation():
     assert len(client.address) > 20
 
 
+def test_dydx_live_client_hex_private_key_with_0x():
+    raw_hex = "4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"
+    client1 = DydxLiveClient(private_key=raw_hex)
+    client2 = DydxLiveClient(private_key=f"0x{raw_hex}")
+    assert client1.private_key == raw_hex
+    assert client2.private_key == raw_hex
+    assert client1.address == client2.address
+    assert client2.address.startswith("dydx1")
+
+
 def test_dydx_live_client_rounding():
     client = DydxLiveClient()
 

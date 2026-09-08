@@ -72,7 +72,13 @@ class DydxLiveClient:
     ):
         self.address = (address or "").strip().lower()
         self.mnemonic = mnemonic.strip() if mnemonic else None
-        self.private_key = private_key.strip() if private_key else None
+        if private_key:
+            pk_clean = private_key.strip()
+            if pk_clean.startswith("0x") or pk_clean.startswith("0X"):
+                pk_clean = pk_clean[2:]
+            self.private_key = pk_clean
+        else:
+            self.private_key = None
         self.subaccount_number = subaccount_number
         self.node_url = node_url
         self.indexer_rest_url = indexer_rest_url.rstrip("/")
@@ -111,7 +117,8 @@ class DydxLiveClient:
             if self.mnemonic:
                 kp = KeyPair.from_mnemonic(self.mnemonic)
             elif self.private_key:
-                kp = KeyPair.from_hex(self.private_key)
+                clean_pk = self.private_key[2:] if (self.private_key.startswith("0x") or self.private_key.startswith("0X")) else self.private_key
+                kp = KeyPair.from_hex(clean_pk)
             else:
                 return ""
             pub_bytes = kp.public_key_bytes
@@ -168,7 +175,8 @@ class DydxLiveClient:
             if self.mnemonic:
                 kp = KeyPair.from_mnemonic(self.mnemonic)
             elif self.private_key:
-                kp = KeyPair.from_hex(self.private_key)
+                clean_pk = self.private_key[2:] if (self.private_key.startswith("0x") or self.private_key.startswith("0X")) else self.private_key
+                kp = KeyPair.from_hex(clean_pk)
             else:
                 kp = None
 
