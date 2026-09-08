@@ -300,7 +300,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             logger.info(
                 f"🚀 [EXECUCIÓ REAL ENVIANT] {coin} {signal.direction.value} | "
                 f"HL: {'BUY' if hl_is_buy else 'SELL'} {hl_sz} @ {signal.hl_price} | "
-                f"Aevo: {'BUY' if aevo_is_buy else 'SELL'} {aevo_sz} @ {signal.bn_price} | "
+                f"{self.venue2_name}: {'BUY' if aevo_is_buy else 'SELL'} {aevo_sz} @ {signal.bn_price} | "
                 f"Mode={'MAKER_FIRST' if effective_maker_first else ('MAKER' if is_maker else 'TAKER_IOC')}"
             )
 
@@ -374,12 +374,12 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             if not hl_ok:
                 logger.warning(
                     f"⚠️ [EXECUCIÓ AVORTADA] Pota Hyperliquid no omplerta per {coin} ({hl_res}). "
-                    f"Cancel·lant sense obrir a Aevo (0 exposició direccional, 0 comissió pagada)."
+                    f"Cancel·lant sense obrir a {self.venue2_name} (0 exposició direccional, 0 comissió pagada)."
                 )
                 return
 
-            # 3. PAS B: Hyperliquid omplert! Enviament immediat de cobertura a Aevo
-            logger.info(f"Pota Hyperliquid omplerta ({hl_fill_type}) per a {coin}. Enviant cobertura immediata a Aevo...")
+            # 3. PAS B: Hyperliquid omplert! Enviament immediat de cobertura a venue2
+            logger.info(f"Pota Hyperliquid omplerta ({hl_fill_type}) per a {coin}. Enviant cobertura immediata a {self.venue2_name}...")
             try:
                 aevo_res = await self.aevo_client.place_order(
                     coin=coin,
@@ -452,7 +452,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             # 5. CAS 2: ROLLBACK DE SEGURETAT (Anti-Unhedged Guard)
             else:
                 logger.error(
-                    f"🚨 [ALERTA DE SEGURETAT] Pota d'Aevo fallada ({aevo_res}) després d'omplir Hyperliquid per {coin}. "
+                    f"🚨 [ALERTA DE SEGURETAT] Pota de {self.venue2_name} fallada ({aevo_res}) després d'omplir Hyperliquid per {coin}. "
                     f"Fent ROLLBACK IMMEDIAT a Hyperliquid per eliminar exposició direccional..."
                 )
                 await self.hl_client.market_close(coin=coin, size=hl_sz)
@@ -495,7 +495,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         try:
             logger.info(
                 f"🔄 [TANCAMENT REAL ENVIANT] {coin} ({reason}) | "
-                f"HL px: {hl_exit_price:.4f} | Aevo px: {bn_exit_price:.4f}"
+                f"HL px: {hl_exit_price:.4f} | {self.venue2_name} px: {bn_exit_price:.4f}"
             )
 
             hl_is_buy_to_close = (pos.leg_hl.side == OrderSide.SELL)
@@ -522,7 +522,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 )
                 return
 
-            # Hyperliquid tancat! Ara tanquem Aevo amb reduce_only
+            # Hyperliquid tancat! Ara tanquem venue2 amb reduce_only
             try:
                 aevo_res = await self.aevo_client.place_order(
                     coin=coin,
@@ -537,7 +537,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
             aevo_ok = isinstance(aevo_res, dict) and aevo_res.get("status") == "ok"
             if not aevo_ok:
-                logger.error(f"🚨 Error tancant Aevo ({aevo_res}). Forçant market_close a Aevo...")
+                logger.error(f"🚨 Error tancant {self.venue2_name} ({aevo_res}). Forçant market_close a {self.venue2_name}...")
                 await self.aevo_client.market_close(coin=coin, size=pos.leg_bn.size)
 
             # Extreure preus reals d'execució retornats per les APIs
