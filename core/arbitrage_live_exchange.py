@@ -169,6 +169,28 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                         )
                         self.active_positions[pair_id] = pos_obj
                         logger.info(f"✅ Reconciliada posició activa existent per a {coin} a active_positions ({pair_id})")
+                    elif hl_pos and not aevo_pos:
+                        # Pota òrfena a Hyperliquid sense cobertura a Venue2 (Anti-Unhedged Guard)
+                        szi = float(hl_pos.get("szi", 0.0))
+                        logger.warning(
+                            f"🚨 [ORPHAN GUARD] Detectada posició òrfena a Hyperliquid per a {coin} "
+                            f"(szi={szi}) sense cobertura a {self.venue2_name}. Tancant a mercat per protegir capital..."
+                        )
+                        try:
+                            await self.hl_client.market_close(coin=coin, size=abs(szi))
+                        except Exception as ohe:
+                            logger.error(f"Error tancant posició òrfena Hyperliquid {coin}: {ohe}")
+                    elif aevo_pos and not hl_pos:
+                        # Pota òrfena a Venue2 sense cobertura a Hyperliquid
+                        amt = float(aevo_pos.get("amount", 0.0))
+                        logger.warning(
+                            f"🚨 [ORPHAN GUARD] Detectada posició òrfena a {self.venue2_name} per a {coin} "
+                            f"(amt={amt}) sense cobertura a Hyperliquid. Tancant a mercat per protegir capital..."
+                        )
+                        try:
+                            await self.venue2_client.market_close(coin=coin, size=amt)
+                        except Exception as ove:
+                            logger.error(f"Error tancant posició òrfena {self.venue2_name} {coin}: {ove}")
 
             # Si una posició local ja està tancada als brokers, l'eliminem
             for coin, pair_id in list(existing_active_coins.items()):
