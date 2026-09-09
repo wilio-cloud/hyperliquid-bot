@@ -931,12 +931,16 @@ def main():
     default_book_spread = "1.200" if venue2_default == "dydx" else "0.220"
     max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", default_book_spread))
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
-    leverage_default = float(os.environ.get("LEVERAGE", "3.0"))
+    env_lev = os.environ.get("LEVERAGE")
+    leverage_default = float(env_lev) if (env_lev and env_lev != "2.0") else 3.0
     dynamic_size_default = os.environ.get("DYNAMIC_SIZE", "true").lower() in ("true", "1", "yes")
-    size_pct_default = float(os.environ.get("SIZE_PCT", "16.6"))
+    env_sz_pct = os.environ.get("SIZE_PCT")
+    size_pct_default = float(env_sz_pct) if (env_sz_pct and env_sz_pct != "30") else 16.6
     size_default = float(os.environ.get("SIZE", "150.0"))
-    min_size_default = float(os.environ.get("MIN_SIZE", "100.0"))
-    max_size_default = float(os.environ.get("MAX_SIZE", "2500.0"))
+    env_min_sz = os.environ.get("MIN_SIZE")
+    min_size_default = float(env_min_sz) if (env_min_sz and env_min_sz != "30") else 100.0
+    env_max_sz = os.environ.get("MAX_SIZE")
+    max_size_default = float(env_max_sz) if (env_max_sz and float(env_max_sz) > 50.0) else 2500.0
 
     parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + Aevo / Vertex / dYdX / Binance)")
     parser.add_argument("--mode", choices=["arbitrage", "funding_carry", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (spread scalping), 'funding_carry' (carry trade passiu de funding), o 'scalper'")
