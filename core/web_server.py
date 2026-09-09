@@ -68,18 +68,30 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .ny-open { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; }
         .ny-pre { background: rgba(249, 115, 22, 0.2); color: #fb923c; border: 1px solid #f97316; }
         .ny-closed { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid #475569; }
+        .btn-pause { background: #ef4444; color: #ffffff; border: none; padding: 6px 14px; font-size: 0.78rem; font-weight: 700; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-pause:hover { opacity: 0.88; }
+        .btn-resume { background: #10b981; color: #0b0f19; border: none; padding: 6px 14px; font-size: 0.78rem; font-weight: 700; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-resume:hover { opacity: 0.88; }
+        .badge-paused { background: rgba(239, 68, 68, 0.25); color: #f87171; border: 1px solid #ef4444; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; display: none; }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
             <div>
-                <h1>⚡ Arbitratge Delta-Neutral <span class="badge" id="badge-mode" style="background: #f59e0b; color: #1e293b;">SIMULACIÓ (PAPER)</span></h1>
-                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="header-sub">Hyperliquid DEX vs Aevo DEX • Dades de Mercat L2 en Temps Real (Sense Diners Reals)</div>
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <h1 style="margin: 0;">⚡ Arbitratge Delta-Neutral</h1>
+                    <span class="badge" id="badge-mode" style="background: #f59e0b; color: #1e293b;">SIMULACIÓ (PAPER)</span>
+                    <span class="badge-paused" id="badge-paused">⛔ TRADING PAUSAT</span>
+                </div>
+                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="header-sub">Hyperliquid DEX vs OKX Perpetuals • Dades de Mercat L2 en Temps Real (Sense Diners Reals)</div>
             </div>
-            <div style="text-align: right;">
-                <span class="badge-strategy" id="mode-tag">DELTA-NEUTRAL ARB (2x)</span>
-                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="uptime">Carregant...</div>
+            <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn-pause" id="btn-pause-toggle" onclick="toggleTradingPause()">⏸️ Pausar Trading</button>
+                    <span class="badge-strategy" id="mode-tag">DELTA-NEUTRAL ARB (2x)</span>
+                </div>
+                <div style="font-size: 0.8rem; color: #94a3b8;" id="uptime">Carregant...</div>
             </div>
         </header>
 
@@ -634,6 +646,42 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             updateChartData();
         }
 
+        let isTradingPaused = false;
+        async function toggleTradingPause() {
+            const btn = document.getElementById('btn-pause-toggle');
+            if (btn) btn.disabled = true;
+            try {
+                const ep = isTradingPaused ? '/api/resume' : '/api/pause';
+                const r = await fetch(ep);
+                const d = await r.json();
+                if (d.status === 'ok') {
+                    updatePauseUI(d.trading_paused);
+                }
+            } catch (err) {
+                console.error('Error toggling pause:', err);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        function updatePauseUI(paused) {
+            isTradingPaused = !!paused;
+            const btn = document.getElementById('btn-pause-toggle');
+            const badge = document.getElementById('badge-paused');
+            if (btn) {
+                if (isTradingPaused) {
+                    btn.className = 'btn-resume';
+                    btn.innerText = '▶️ Reprendre Trading';
+                } else {
+                    btn.className = 'btn-pause';
+                    btn.innerText = '⏸️ Pausar Trading';
+                }
+            }
+            if (badge) {
+                badge.style.display = isTradingPaused ? 'inline-block' : 'none';
+            }
+        }
+
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
@@ -643,6 +691,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 }
                 const data = await res.json();
                 const m = data.metrics || {};
+
+                if (m.trading_paused !== undefined) {
+                    updatePauseUI(m.trading_paused);
+                }
                 
                 const venueRaw = (m.venue2_name || 'AEVO').toUpperCase();
                 let v2Name = 'Aevo DEX';
@@ -653,6 +705,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     v2Name = 'dYdX v4';
                     v2Short = 'dYdX';
                     subText = 'Hyperliquid DEX vs dYdX v4 • 100% Descentralitzat (DEX-to-DEX)';
+                } else if (venueRaw === 'OKX') {
+                    v2Name = 'OKX Perpetuals';
+                    v2Short = 'OKX';
+                    subText = 'Hyperliquid DEX vs OKX Perpetuals • Arbitratge Creuat 0% Risc';
                 } else if (venueRaw === 'BINANCE') {
                     v2Name = 'Binance';
                     v2Short = 'BN';
