@@ -1240,12 +1240,33 @@ class WebDashboardServer:
                             pos_calc = await client.get_positions()
                             cfg_res = await client._request("GET", "/api/v5/account/config")
                             acct_cfg = cfg_res.get("data", [{}])[0] if cfg_res.get("code") == "0" else {}
+                            
+                            # Test direct d'ordre per comprovar permisos de mercat (50124)
+                            probe_ord = await client._request(
+                                "POST",
+                                "/api/v5/trade/order",
+                                data={
+                                    "instId": "INJ-USDT-SWAP",
+                                    "tdMode": "cross",
+                                    "side": "buy",
+                                    "ordType": "post_only",
+                                    "sz": "1",
+                                    "px": "0.1",
+                                    "posSide": "net",
+                                },
+                            )
+                            if probe_ord.get("code") == "0" and probe_ord.get("data"):
+                                oid = probe_ord["data"][0].get("ordId")
+                                if oid:
+                                    await client._request("POST", "/api/v5/trade/cancel-order", data={"instId": "INJ-USDT-SWAP", "ordId": oid})
+
                             probe_results[tag]["trading_total"] = bal_calc.get("total", 0.0)
                             probe_results[tag]["funding_total"] = fund_calc.get("total_usd", 0.0)
                             probe_results[tag]["trading_currencies"] = bal_calc.get("currencies", {})
                             probe_results[tag]["funding_currencies"] = fund_calc.get("currencies", {})
                             probe_results[tag]["positions"] = pos_calc
                             probe_results[tag]["account_config"] = acct_cfg
+                            probe_results[tag]["order_probe"] = probe_ord
                             if not active_match:
                                 active_match = {
                                     "domain": domain,
@@ -1257,6 +1278,7 @@ class WebDashboardServer:
                                     "funding_currencies": fund_calc.get("currencies", {}),
                                     "trading_code": t_code,
                                     "account_config": acct_cfg,
+                                    "order_probe": probe_ord,
                                 }
                                 matched_positions = pos_calc
                                 break  # Trobat amb èxit!
@@ -1273,6 +1295,7 @@ class WebDashboardServer:
                     "account_level": active_match.get("account_config", {}).get("acctLv", "N/A"),
                     "pos_mode": active_match.get("account_config", {}).get("posMode", "N/A"),
                     "account_config": active_match.get("account_config", {}),
+                    "order_probe": active_match.get("order_probe", {}),
                     "trading_currencies": active_match.get("trading_currencies", {}) if active_match else {},
                     "funding_currencies": active_match.get("funding_currencies", {}) if active_match else {},
                     "open_positions_count": len(matched_positions),
