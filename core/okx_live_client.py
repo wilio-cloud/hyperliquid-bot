@@ -74,7 +74,8 @@ class OkxLiveClient:
             if is_demo is not None
             else (os.environ.get("OKX_IS_DEMO", "false").lower() in ("1", "true", "yes"))
         )
-        self.base_url = (base_url or os.environ.get("OKX_REST_URL", "https://www.okx.com")).strip().rstrip("/")
+        default_base_url = "https://eea.okx.com" if os.environ.get("OKX_REGION", "eea").lower() == "eea" else "https://www.okx.com"
+        self.base_url = (base_url or os.environ.get("OKX_REST_URL", default_base_url)).strip().rstrip("/")
         self._ssl_context = get_ssl_context()
         self.contract_specs: Dict[str, dict] = {}
         self._specs_initialized = False
