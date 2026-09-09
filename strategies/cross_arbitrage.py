@@ -312,12 +312,15 @@ class CrossExchangeArbitrageStrategy:
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
             order_size_usd = pos.leg_hl.size * pos.leg_hl.entry_price
-            # Take profit proporcional més dinàmic (mínim 0.25$ o 0.10% net del valor de l'ordre)
-            target_tp = max(0.25, order_size_usd * 0.0010)
+            # Take profit proporcional a la mida de l'ordre (0.10% net, mínim 0.030$ per a micro-ordres)
+            target_tp = max(0.030, order_size_usd * 0.0010)
             if self.take_profit_usd and 0 < self.take_profit_usd < target_tp:
                 target_tp = self.take_profit_usd
 
-            target_min_profit = min(self.min_profit_usd, max(0.12, order_size_usd * 0.0006))
+            # Mínim de benefici net garantit per convergència (0.05% net, mínim 0.015$ per a micro-ordres)
+            target_min_profit = max(0.015, order_size_usd * 0.0005)
+            if self.min_profit_usd and 0 < self.min_profit_usd < target_min_profit:
+                target_min_profit = self.min_profit_usd
 
             # 1. Take profit anticipat si el benefici net real arriba a l'objectiu
             if projected_net_pnl >= target_tp:
@@ -358,11 +361,15 @@ class CrossExchangeArbitrageStrategy:
             projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
 
             order_size_usd = pos.leg_hl.size * pos.leg_hl.entry_price
-            target_tp = max(0.25, order_size_usd * 0.0010)
+            # Take profit proporcional a la mida de l'ordre (0.10% net, mínim 0.030$ per a micro-ordres)
+            target_tp = max(0.030, order_size_usd * 0.0010)
             if self.take_profit_usd and 0 < self.take_profit_usd < target_tp:
                 target_tp = self.take_profit_usd
 
-            target_min_profit = min(self.min_profit_usd, max(0.12, order_size_usd * 0.0006))
+            # Mínim de benefici net garantit per convergència (0.05% net, mínim 0.015$ per a micro-ordres)
+            target_min_profit = max(0.015, order_size_usd * 0.0005)
+            if self.min_profit_usd and 0 < self.min_profit_usd < target_min_profit:
+                target_min_profit = self.min_profit_usd
 
             if projected_net_pnl >= target_tp:
                 return ("TAKE_PROFIT_TARGET", hl_exit_px, bn_exit_px)

@@ -12,6 +12,8 @@ logger = logging.getLogger("HyperliquidLiveClient")
 
 # Precisió de decimals per moneda a Hyperliquid
 COIN_SZ_DECIMALS = {
+    "BTC": 5,
+    "ETH": 4,
     "SOL": 2,
     "HYPE": 2,
     "NEAR": 1,
@@ -24,6 +26,13 @@ COIN_SZ_DECIMALS = {
     "OP": 1,
     "TIA": 1,
     "INJ": 1,
+    "APT": 2,
+    "SEI": 0,
+    "RENDER": 1,
+    "ENA": 0,
+    "WIF": 0,
+    "AAVE": 2,
+    "UNI": 1,
     "ZEC": 2,
     "kPEPE": 0,
     "PEPE": 0,
@@ -69,10 +78,25 @@ class HyperliquidLiveClient:
             account_address=self.wallet_address,
         )
         self.info = Info(self.base_url, skip_ws=True)
+        self.coin_sz_decimals: Dict[str, int] = dict(COIN_SZ_DECIMALS)
+        self._load_meta_sz_decimals()
         logger.info(
             f"HyperliquidLiveClient inicialitzat per a wallet {self.wallet_address[:8]}... "
             f"mitjançant Agent {self.agent_account.address[:8]}... (Testnet={self.testnet})"
         )
+
+    def _load_meta_sz_decimals(self):
+        """Carrega dinàmicament els decimals de mida de cada actiu des de la metadata d'Hyperliquid."""
+        try:
+            meta = self.info.meta()
+            for item in meta.get("universe", []):
+                name = item.get("name")
+                sz_dec = item.get("szDecimals")
+                if name and sz_dec is not None:
+                    self.coin_sz_decimals[name.upper()] = int(sz_dec)
+            logger.info(f"Carregats dinàmicament szDecimals per a {len(self.coin_sz_decimals)} actius d'Hyperliquid.")
+        except Exception as e:
+            logger.warning(f"No s'han pogut carregar szDecimals dinàmics d'Hyperliquid (s'usaran valors per defecte): {e}")
 
     async def get_referral_state(self) -> Dict[str, Any]:
         """Consulta l'estat de referits del compte a Hyperliquid."""
@@ -109,7 +133,8 @@ class HyperliquidLiveClient:
 
     def round_size(self, coin: str, size: float) -> float:
         """Ajusta la mida al nombre màxim de decimals admès per Hyperliquid."""
-        decimals = COIN_SZ_DECIMALS.get(coin.upper(), 2)
+        sz_map = getattr(self, "coin_sz_decimals", COIN_SZ_DECIMALS)
+        decimals = sz_map.get(coin.upper(), COIN_SZ_DECIMALS.get(coin.upper(), 2))
         if decimals == 0:
             return float(int(size))
         return round(size, decimals)

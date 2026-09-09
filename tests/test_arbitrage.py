@@ -552,6 +552,41 @@ def test_pepe_kpepe_mapping():
     assert book.bids[0].size == 1000000.0  # 1000 * 1000
     print("  Mapeig i escalat de kPEPE -> PEPE verificat amb èxit.")
 
+def test_micro_order_proportional_exit():
+    """Verifica que ordres micro (25-30$) poden tancar amb guanys de cèntims proporcionals."""
+    exchange = ArbitragePaperExchange(
+        initial_hl_balance=50.0,
+        initial_bn_balance=50.0,
+        venue2_name="DYDX",
+        maker_first=True,
+    )
+    strat = CrossExchangeArbitrageStrategy(
+        min_entry_spread_pct=0.250,
+        target_exit_spread_pct=0.010,
+        maker_first=True,
+    )
+    # Entrada de 30$ a ETH amb spread del 0.250%
+    signal = ArbitrageSignal(
+        coin="ETH",
+        direction=ArbitrageDirection.SELL_HL_BUY_BN,
+        hl_price=2506.25,
+        bn_price=2500.0,
+        spread_pct=0.250,
+    )
+    pos = exchange.open_arbitrage_position(signal, size_usd=30.0)
+    assert pos is not None
+    
+    # Convergència a 0.010% d'spread
+    hl_book = OrderBookL2(coin="ETH", timestamp=2000.0, bids=[BookLevel(price=2500.0, size=1.0)], asks=[BookLevel(price=2500.25, size=1.0)])
+    dydx_book = OrderBookL2(coin="ETH", timestamp=2000.0, bids=[BookLevel(price=2500.0, size=1.0)], asks=[BookLevel(price=2500.1, size=1.0)])
+    strat.update_hl_book(hl_book)
+    strat.update_bn_book(dydx_book)
+
+    exit_res = strat.check_exit(pos)
+    assert exit_res is not None
+    assert exit_res[0] in ("CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET")
+    print("  Tancament de micro-ordres per benefici proporcional verificat amb èxit.")
+
 if __name__ == "__main__":
     test_spread_calculation_and_signal()
     test_arbitrage_execution_and_pnl()
@@ -567,4 +602,5 @@ if __name__ == "__main__":
     test_per_coin_effective_spread_and_cooldown()
     test_time_based_exit_guards_never_exit_at_loss()
     test_pepe_kpepe_mapping()
+    test_micro_order_proportional_exit()
     print("✅ Tots els tests d'arbitratge han passat amb èxit!")
