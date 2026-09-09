@@ -1097,8 +1097,12 @@ class WebDashboardServer:
         dydx_addr = os.getenv("DYDX_ADDRESS", "").strip()
         dydx_mnemonic = (os.getenv("DYDX_MNEMONIC") or "").strip()
         dydx_pk = (os.getenv("DYDX_PRIVATE_KEY") or os.getenv("DYDX_PRIVATE") or "").strip()
+        okx_key = os.getenv("OKX_API_KEY", "").strip()
+        okx_secret = os.getenv("OKX_API_SECRET", "").strip()
+        okx_passphrase = os.getenv("OKX_PASSPHRASE", "").strip()
+        okx_is_demo = os.getenv("OKX_IS_DEMO", "false").lower() in ("1", "true", "yes")
         exec_mode = os.getenv("EXECUTION_MODE", "paper").strip().lower()
-        venue2 = os.getenv("VENUE2", "dydx").strip().lower()
+        venue2 = os.getenv("VENUE2", "okx").strip().lower()
 
         # Resum de variables d'entorn (emmascarades per seguretat)
         diag["env_configured"] = {
@@ -1108,6 +1112,11 @@ class WebDashboardServer:
             "wallet_address_masked": f"{wallet_addr[:6]}...{wallet_addr[-4:]}" if len(wallet_addr) >= 10 else ("configured" if wallet_addr else "missing"),
             "has_hl_agent_key": bool(hl_key),
             "hl_agent_key_len": len(hl_key) if hl_key else 0,
+            "has_okx_key": bool(okx_key),
+            "okx_key_masked": f"{okx_key[:4]}...{okx_key[-4:]}" if len(okx_key) >= 8 else ("configured" if okx_key else "missing"),
+            "has_okx_secret": bool(okx_secret),
+            "has_okx_passphrase": bool(okx_passphrase),
+            "okx_is_demo": okx_is_demo,
             "has_dydx_address": bool(dydx_addr),
             "dydx_address_masked": f"{dydx_addr[:8]}...{dydx_addr[-4:]}" if len(dydx_addr) >= 12 else ("configured" if dydx_addr else "missing"),
             "has_dydx_mnemonic": bool(dydx_mnemonic),
@@ -1182,7 +1191,42 @@ class WebDashboardServer:
         else:
             diag["hyperliquid"] = {"status": "NOT_CONFIGURED", "message": "WALLET_ADDRESS no establerta a les variables d'entorn."}
 
-        # 2. Prova de connexió amb dYdX v4 Indexer API
+        # 2. Prova de connexió amb Venue 2 (OKX o dYdX)
+        diag["okx"] = {}
+        if okx_key and okx_secret and okx_passphrase:
+            try:
+                from core.okx_live_client import OkxLiveClient
+                okx_test_client = OkxLiveClient(
+                    api_key=okx_key,
+                    api_secret=okx_secret,
+                    passphrase=okx_passphrase,
+                    is_demo=okx_is_demo,
+                )
+                bal_data = await okx_test_client.get_account_balance()
+                pos_data = await okx_test_client.get_positions()
+                diag["okx"] = {
+                    "status": "CONNECTED",
+                    "total_equity_usd": round(bal_data.get("total", 0.0), 2),
+                    "available_balance_usd": round(bal_data.get("available", 0.0), 2),
+                    "open_positions_count": len(pos_data),
+                    "open_positions": pos_data,
+                    "is_demo": okx_is_demo,
+                    "credentials_valid": True,
+                }
+            except Exception as oe:
+                diag["okx"] = {
+                    "status": "ERROR",
+                    "error": str(oe),
+                    "credentials_valid": False,
+                }
+        else:
+            diag["okx"] = {
+                "status": "NOT_CONFIGURED",
+                "message": "Falten OKX_API_KEY, OKX_API_SECRET o OKX_PASSPHRASE a les variables d'entorn.",
+            }
+
+        # dYdX v4 Indexer API (si dYdX està configurat)
+        diag["dydx"] = {}
         if dydx_addr:
             try:
                 import aiohttp
@@ -1225,7 +1269,7 @@ class WebDashboardServer:
         if hasattr(self.exchange, "hl_client") and hasattr(self.exchange, "venue2_client"):
             try:
                 hl_state = await self.exchange.hl_client.get_account_state()
-                dydx_pos = await self.exchange.venue2_client.get_positions()
+                v2_pos = await self.exchange.venue2_client.get_positions()
                 hl_real_positions = [
                     p.get("position")
                     for p in hl_state.get("assetPositions", [])
@@ -1236,8 +1280,8 @@ class WebDashboardServer:
                     "active_internal_positions": len(getattr(self.exchange, "active_positions", {})),
                     "hl_real_open_positions": len(hl_real_positions),
                     "hl_open_positions_detail": hl_real_positions,
-                    "dydx_real_open_positions": len(dydx_pos) if isinstance(dydx_pos, list) else 0,
-                    "dydx_open_positions_detail": dydx_pos if isinstance(dydx_pos, list) else [],
+                    "venue2_real_open_positions": len(v2_pos) if isinstance(v2_pos, list) else 0,
+                    "venue2_open_positions_detail": v2_pos if isinstance(v2_pos, list) else [],
                 }
             except Exception as le:
                 diag["live_exchange"] = {"is_live": True, "error": str(le)}
@@ -1245,39 +1289,50 @@ class WebDashboardServer:
             diag["live_exchange"] = {"is_live": False, "note": "El bot està corrent en mode simulació (Paper)."}
 
         # 4. Checklist de Preparació per a Trading Real
-        dydx_ready = True
-        dydx_ready_reason = "OK"
-        if hasattr(self.exchange, "venue2_client") and hasattr(self.exchange.venue2_client, "is_ready_to_trade"):
-            dydx_ready, dydx_ready_reason = self.exchange.venue2_client.is_ready_to_trade()
-        elif dydx_addr and (dydx_mnemonic or dydx_pk):
-            try:
-                from core.dydx_live_client import DydxLiveClient
-                temp_dydx = DydxLiveClient(address=dydx_addr, mnemonic=dydx_mnemonic, private_key=dydx_pk)
-                dydx_ready, dydx_ready_reason = temp_dydx.is_ready_to_trade()
-            except Exception:
-                pass
-
-        if not dydx_ready:
-            diag["dydx"]["credentials_valid"] = False
-            diag["dydx"]["credentials_error"] = dydx_ready_reason
-        else:
-            diag["dydx"]["credentials_valid"] = True
-
         hl_ok = diag["hyperliquid"].get("status") == "CONNECTED" and bool(hl_key)
-        dydx_ok = diag["dydx"].get("status") == "CONNECTED" and bool(dydx_mnemonic or dydx_pk) and dydx_ready
         has_hl_funds = diag["hyperliquid"].get("account_value_usd", 0.0) >= 10.0
-        has_dydx_funds = diag["dydx"].get("free_collateral_usd", 0.0) >= 10.0
 
-        checklist = [
-            f"Hyperliquid API: {'✅ CONNECTAT' if hl_ok else '❌ FALTA O ERROR'}",
-            f"Hyperliquid Fons: {'✅ $' + str(diag['hyperliquid'].get('account_value_usd', 0)) if has_hl_funds else '⚠️ Menys de 10$ USDC'}",
-            f"dYdX v4 API: {'✅ CONNECTAT' if diag['dydx'].get('status') == 'CONNECTED' else '❌ FALTA O ERROR'}",
-            f"dYdX v4 Credencials: {'✅ COHERENTS' if dydx_ready else '❌ ERROR CLAU (Cal DYDX_MNEMONIC de 24 paraules)'}",
-            f"dYdX Fons: {'✅ $' + str(diag['dydx'].get('free_collateral_usd', 0)) if has_dydx_funds else '⚠️ Menys de 10$ USDC'}",
-            f"Mode d'Execució a Railway: {'⚡ LIVE (REAL)' if exec_mode == 'live' else '📄 PAPER (SIMULACIÓ)'}",
-        ]
+        if venue2 == "okx":
+            okx_connected = diag["okx"].get("status") == "CONNECTED"
+            okx_eq = diag["okx"].get("total_equity_usd", 0.0)
+            has_okx_funds = okx_eq >= 10.0
+            checklist = [
+                f"Hyperliquid API: {'✅ CONNECTAT' if hl_ok else '❌ FALTA O ERROR'}",
+                f"Hyperliquid Fons: {'✅ $' + str(diag['hyperliquid'].get('account_value_usd', 0)) if has_hl_funds else '⚠️ Menys de 10$ USDC'}",
+                f"OKX Perpetuals API: {'✅ CONNECTAT' if okx_connected else '❌ FALTA O ERROR (Revisa OKX_API_KEY/SECRET/PASSPHRASE)'}",
+                f"OKX Credencials: {'✅ VÀLIDES' if okx_connected else '❌ ERROR O NO CONFIGURADES'}",
+                f"OKX Fons: {'✅ $' + str(okx_eq) if has_okx_funds else f'⚠️ Menys de 10$ USDT (${okx_eq})'}",
+                f"Mode d'Execució a Railway: {'⚡ LIVE (REAL)' if exec_mode == 'live' else '📄 PAPER (SIMULACIÓ)'}",
+            ]
+            ready_for_live = hl_ok and okx_connected and has_hl_funds and has_okx_funds
+        else:
+            dydx_ready = True
+            dydx_ready_reason = "OK"
+            if hasattr(self.exchange, "venue2_client") and hasattr(self.exchange.venue2_client, "is_ready_to_trade"):
+                dydx_ready, dydx_ready_reason = self.exchange.venue2_client.is_ready_to_trade()
+            elif dydx_addr and (dydx_mnemonic or dydx_pk):
+                try:
+                    from core.dydx_live_client import DydxLiveClient
+                    temp_dydx = DydxLiveClient(address=dydx_addr, mnemonic=dydx_mnemonic, private_key=dydx_pk)
+                    dydx_ready, dydx_ready_reason = temp_dydx.is_ready_to_trade()
+                except Exception:
+                    pass
+
+            dydx_ok = diag["dydx"].get("status") == "CONNECTED" and bool(dydx_mnemonic or dydx_pk) and dydx_ready
+            has_dydx_funds = diag["dydx"].get("free_collateral_usd", 0.0) >= 10.0
+
+            checklist = [
+                f"Hyperliquid API: {'✅ CONNECTAT' if hl_ok else '❌ FALTA O ERROR'}",
+                f"Hyperliquid Fons: {'✅ $' + str(diag['hyperliquid'].get('account_value_usd', 0)) if has_hl_funds else '⚠️ Menys de 10$ USDC'}",
+                f"dYdX v4 API: {'✅ CONNECTAT' if diag['dydx'].get('status') == 'CONNECTED' else '❌ FALTA O ERROR'}",
+                f"dYdX v4 Credencials: {'✅ COHERENTS' if dydx_ready else '❌ ERROR CLAU (Cal DYDX_MNEMONIC de 24 paraules)'}",
+                f"dYdX Fons: {'✅ $' + str(diag['dydx'].get('free_collateral_usd', 0)) if has_dydx_funds else '⚠️ Menys de 10$ USDC'}",
+                f"Mode d'Execució a Railway: {'⚡ LIVE (REAL)' if exec_mode == 'live' else '📄 PAPER (SIMULACIÓ)'}",
+            ]
+            ready_for_live = hl_ok and dydx_ok and has_hl_funds and has_dydx_funds
+
         diag["checklist"] = checklist
-        diag["ready_for_live"] = hl_ok and dydx_ok and has_hl_funds and has_dydx_funds
+        diag["ready_for_live"] = ready_for_live
 
         return web.json_response(diag)
 
