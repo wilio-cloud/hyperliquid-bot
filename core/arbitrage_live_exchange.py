@@ -458,6 +458,8 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                     logger.debug(f"Error comprovant is_ready_to_trade: {te}")
 
             # 2. PAS A: Enviament de la pota primària (Hyperliquid Alo si Maker-First, o IOC si Taker)
+            hl_res = None
+            fb_res = None
             use_post_only = is_maker or effective_maker_first
 
             # Determinació del preu d'execució:
@@ -607,21 +609,47 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
             # 4. CAS 1: Ambdues han tingut èxit -> Posició delta-neutral assegurada!
             if aevo_ok:
+                # Extreure preus reals d'execució d'entrada retornats per les APIs
+                actual_hl_entry_px = signal.hl_price
+                effective_hl_res = fb_res if hl_fill_type == "TAKER_FALLBACK" else hl_res
+                if isinstance(effective_hl_res, dict) and "filled" in effective_hl_res:
+                    try:
+                        actual_hl_entry_px = float(effective_hl_res["filled"].get("avgPx", signal.hl_price))
+                    except Exception:
+                        pass
+
+                actual_bn_entry_px = signal.bn_price
+                if isinstance(aevo_res, dict) and "data" in aevo_res:
+                    try:
+                        actual_bn_entry_px = float(aevo_res["data"].get("avg_price", aevo_res["data"].get("price", signal.bn_price)))
+                    except Exception:
+                        pass
+
+                # Càlcul del spread real executat d'entrada
+                entry_mid = (actual_hl_entry_px + actual_bn_entry_px) / 2.0
+                if hl_is_buy:
+                    actual_entry_spread = ((actual_bn_entry_px - actual_hl_entry_px) / entry_mid * 100.0) if entry_mid > 0 else signal.spread_pct
+                else:
+                    actual_entry_spread = ((actual_hl_entry_px - actual_bn_entry_px) / entry_mid * 100.0) if entry_mid > 0 else signal.spread_pct
+
                 hl_fee_rate = self.hl_maker_fee if hl_fill_type == "MAKER" else self.hl_taker_fee
                 bn_fee_rate = self.bn_maker_fee if is_maker else self.bn_taker_fee
 
-                hl_entry_fee = size_usd * hl_fee_rate
-                bn_entry_fee = size_usd * bn_fee_rate
+                actual_hl_usd = hl_sz * actual_hl_entry_px
+                actual_bn_usd = aevo_sz * actual_bn_entry_px
+
+                hl_entry_fee = actual_hl_usd * hl_fee_rate
+                bn_entry_fee = actual_bn_usd * bn_fee_rate
                 self.total_fees_paid += (hl_entry_fee + bn_entry_fee)
 
                 leg_hl = ArbitrageLeg(
                     venue="HYPERLIQUID",
                     coin=coin,
                     side=OrderSide.BUY if hl_is_buy else OrderSide.SELL,
-                    entry_price=signal.hl_price,
+                    entry_price=actual_hl_entry_px,
                     size=hl_sz,
-                    size_usd=size_usd,
-                    current_price=signal.hl_price,
+                    size_usd=actual_hl_usd,
+                    current_price=actual_hl_entry_px,
                     fee_rate=hl_fee_rate,
                     fees_paid=hl_entry_fee,
                 )
@@ -629,10 +657,10 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                     venue=self.venue2_name,
                     coin=coin,
                     side=OrderSide.BUY if aevo_is_buy else OrderSide.SELL,
-                    entry_price=signal.bn_price,
+                    entry_price=actual_bn_entry_px,
                     size=aevo_sz,
-                    size_usd=size_usd,
-                    current_price=signal.bn_price,
+                    size_usd=actual_bn_usd,
+                    current_price=actual_bn_entry_px,
                     fee_rate=bn_fee_rate,
                     fees_paid=bn_entry_fee,
                 )
@@ -643,16 +671,16 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                     direction=signal.direction,
                     leg_hl=leg_hl,
                     leg_bn=leg_bn,
-                    entry_spread_pct=signal.spread_pct,
+                    entry_spread_pct=actual_entry_spread,
                     entry_time=time.time(),
-                    current_spread_pct=signal.spread_pct,
+                    current_spread_pct=actual_entry_spread,
                 )
                 position.update_pnl()
                 self.active_positions[pair_id] = position
 
                 logger.info(
                     f"✅ [ARB REAL OBERT AMB ÈXIT] {coin} {signal.direction.value} | "
-                    f"Spread: {signal.spread_pct:+.3f}% | Mida: {size_usd:.1f}$ x 2"
+                    f"Spread Real: {actual_entry_spread:+.3f}% (HL: {actual_hl_entry_px:.5g}, {self.venue2_name}: {actual_bn_entry_px:.5g}) | Mida: {actual_hl_usd:.1f}$ x 2"
                 )
                 self.record_equity_point("OPEN")
                 self.save_state()
