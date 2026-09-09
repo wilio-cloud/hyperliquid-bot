@@ -1247,13 +1247,37 @@ class WebDashboardServer:
                             
                             # Consultar instruments FUTURES (on estan els X-Perps a EEA)
                             fut_raw = await client._request("GET", "/api/v5/public/instruments", params={"instType": "FUTURES"})
-                            fut_list = [i.get("instId") for i in fut_raw.get("data", [])[:15]]
+                            fut_data = fut_raw.get("data", [])
+                            all_xperps = [i.get("instId") for i in fut_data if "XPERP" in i.get("instId", "")]
+                            near_xperps = [i.get("instId") for i in fut_data if "NEAR" in i.get("instId", "") and "XPERP" in i.get("instId", "")]
+                            near_inst = near_xperps[0] if near_xperps else "NEAR-USD_UM_XPERP-310404"
                             
-                            # Test d'ordres
+                            # Prova d'ordre real sobre el contracte X-Perp
+                            test_xperp = await client._request(
+                                "POST",
+                                "/api/v5/trade/order",
+                                data={
+                                    "instId": near_inst,
+                                    "tdMode": "cross",
+                                    "side": "buy",
+                                    "ordType": "post_only",
+                                    "sz": "1",
+                                    "px": "0.5",
+                                    "posSide": "net",
+                                },
+                            )
+                            if test_xperp.get("code") == "0" and test_xperp.get("data"):
+                                oid = test_xperp["data"][0].get("ordId")
+                                if oid:
+                                    await client._request("POST", "/api/v5/trade/cancel-order", data={"instId": near_inst, "ordId": oid})
+
                             probe_tests = {
                                 "all_positions_count": len(all_pos_data),
                                 "sample_positions": [{"instId": p.get("instId"), "pos": p.get("pos"), "mgnMode": p.get("mgnMode")} for p in all_pos_data[:5]],
-                                "sample_futures_instruments": fut_list,
+                                "near_xperp_inst": near_inst,
+                                "test_xperp_res": test_xperp,
+                                "total_xperps_count": len(all_xperps),
+                                "sample_xperps": all_xperps[:10],
                             }
                             probe_ord = probe_tests
 
