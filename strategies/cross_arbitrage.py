@@ -31,8 +31,10 @@ class CrossExchangeArbitrageStrategy:
         max_book_spread_pct: float = 0.220,    # Llindar màxim d'spread intern (filtre de llibres buits o il·líquids)
         per_coin_min_spread: Optional[Dict[str, float]] = None, # Llindars personalitzats per actiu
         maker_first: bool = False,             # Execució Maker-First (reducció de fees per obrir a llindars menors)
+        venue2_name: str = "AEVO",             # Nom del segon exchange (AEVO, DYDX, OKX)
     ):
         self.name = "CROSS_ARBITRAGE"
+        self.venue2_name = venue2_name.upper()
         self.maker_first = maker_first
         self.min_entry_spread_pct = min_entry_spread_pct
         self.weekend_min_spread_pct = weekend_min_spread_pct
@@ -304,8 +306,8 @@ class CrossExchangeArbitrageStrategy:
             hl_gross = (pos.leg_hl.entry_price - hl_exit_px) * pos.leg_hl.size
             bn_gross = (bn_exit_px - pos.leg_bn.entry_price) * pos.leg_bn.size
             
-            venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
-            venue2_fee_rate = 0.00050 if ("AEVO" in venue2_name or "DYDX" in venue2_name) else 0.00040  # Taker real Aevo/dYdX 0.050%
+            venue2_name = getattr(pos.leg_bn, "venue", self.venue2_name).upper()
+            venue2_fee_rate = 0.00050 if ("AEVO" in venue2_name or "DYDX" in venue2_name or "OKX" in venue2_name) else 0.00040  # Taker real Aevo/dYdX/OKX 0.050%
             hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00045  # Taker IOC exit 0.045% (o 0.043% amb referit)
             bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_fee_rate
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
@@ -353,8 +355,8 @@ class CrossExchangeArbitrageStrategy:
             hl_gross = (hl_exit_px - pos.leg_hl.entry_price) * pos.leg_hl.size
             bn_gross = (pos.leg_bn.entry_price - bn_exit_px) * pos.leg_bn.size
             
-            venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
-            venue2_fee_rate = 0.00050 if ("AEVO" in venue2_name or "DYDX" in venue2_name) else 0.00040
+            venue2_name = getattr(pos.leg_bn, "venue", self.venue2_name).upper()
+            venue2_fee_rate = 0.00050 if ("AEVO" in venue2_name or "DYDX" in venue2_name or "OKX" in venue2_name) else 0.00040
             hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00045  # Taker IOC exit 0.045% (o 0.043% amb referit)
             bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_fee_rate
             projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
@@ -388,8 +390,8 @@ class CrossExchangeArbitrageStrategy:
                 pos.divergence_start_time = None
 
         # 4. Gestió per temps (Time-based Profit Guard):
-        # Mai sortim en negatiu per temps. Com que som 100% delta-neutral, esperem la convergència.
-        # Només permetem sortida si el PnL net és sòlidament positiu després de totes les comissions:
+        # Protecció delta-neutral: afavorim tancaments en positiu, però evitem el bloqueig indefinit de capital
+        # si un exchange té llibres oberts o una operació no convergeix al cap d'1 hora.
         pos_age = time.time() - pos.entry_time
         time_quick_tp = max(0.020, order_size_usd * 0.0006)
         time_breakeven_tp = max(0.012, order_size_usd * 0.0004)
@@ -403,9 +405,17 @@ class CrossExchangeArbitrageStrategy:
         if pos_age >= 1800.0 and projected_net_pnl >= time_breakeven_tp:
             return ("TIME_BREAKEVEN", hl_exit_px, bn_exit_px)
 
-        # C) Si porta > 45 minuts (2700s) i el PnL net cobreix amb escreix totes les comissions reals, allibera ranura
+        # C) Si porta > 45 minuts (2700s) i el PnL net cobreix comissions reals, allibera ranura
         if pos_age >= 2700.0 and projected_net_pnl >= time_slot_free_tp:
             return ("TIME_SLOT_FREE", hl_exit_px, bn_exit_px)
+
+        # D) Rotació de capital (> 60 minuts / 3600s): Si està a breakeven (pèrdua allowable de només 0.01$), allibera ranura
+        if pos_age >= 3600.0 and projected_net_pnl >= -0.010:
+            return ("TIME_ROTATION_BREAKEVEN", hl_exit_px, bn_exit_px)
+
+        # E) Timeout màxim de desbloqueig (> 2 hores / 7200s): Alliberar ranura si el cost d'espera supera la rotació (pèrdua projectada <= 0.03$)
+        if pos_age >= 7200.0 and projected_net_pnl >= -0.030:
+            return ("TIME_MAX_RELEASE", hl_exit_px, bn_exit_px)
 
         return None
 
@@ -421,7 +431,7 @@ class CrossExchangeArbitrageStrategy:
         if hl_inner > self.max_book_spread_pct:
             return f"🛡️ Protegit: Llibre HL buit ({hl_inner:.2f}% > {self.max_book_spread_pct:.2f}%)"
         if bn_inner > self.max_book_spread_pct:
-            return f"🛡️ Protegit: Llibre dYdX buit ({bn_inner:.2f}% > {self.max_book_spread_pct:.2f}%)"
+            return f"🛡️ Protegit: Llibre {self.venue2_name} buit ({bn_inner:.2f}% > {self.max_book_spread_pct:.2f}%)"
 
         global_mid = (hl_book.mid_price + bn_book.mid_price) / 2.0
         if pos.direction == ArbitrageDirection.SELL_HL_BUY_BN:
@@ -437,8 +447,8 @@ class CrossExchangeArbitrageStrategy:
             hl_gross = (hl_exit_px - pos.leg_hl.entry_price) * pos.leg_hl.size
             bn_gross = (pos.leg_bn.entry_price - bn_exit_px) * pos.leg_bn.size
 
-        venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
-        venue2_fee_rate = 0.00050 if ("AEVO" in venue2_name or "DYDX" in venue2_name) else 0.00040
+        venue2_name = getattr(pos.leg_bn, "venue", self.venue2_name).upper()
+        venue2_fee_rate = 0.00050 if ("AEVO" in venue2_name or "DYDX" in venue2_name or "OKX" in venue2_name) else 0.00040
         hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00045
         bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_fee_rate
         projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee

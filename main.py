@@ -21,8 +21,10 @@ from core.arbitrage_paper_exchange import ArbitragePaperExchange
 from core.hyperliquid_live_client import HyperliquidLiveClient
 from core.aevo_live_client import AevoLiveClient
 from core.dydx_live_client import DydxLiveClient
+from core.okx_live_client import OkxLiveClient
 from core.binance_ws_client import BinanceFuturesWSClient, get_ssl_context
 from core.dydx_ws_client import DydxV4WSClient
+from core.okx_ws_client import OkxWSClient
 from core.vertex_ws_client import VertexWSClient
 from core.models import OrderBookL2, OrderSide, Signal, Trade
 from core.paper_exchange import PaperExchange
@@ -93,6 +95,8 @@ class ArbitrageTradingBotApp:
             self.venue2_label = "Aevo DEX"
         elif self.venue2 == "dydx":
             self.venue2_label = "dYdX v4"
+        elif self.venue2 == "okx":
+            self.venue2_label = "OKX Perpetuals (USDT-M)"
         elif self.venue2 == "vertex":
             self.venue2_label = "Vertex Protocol (0% Maker)"
         else:
@@ -155,6 +159,30 @@ class ArbitrageTradingBotApp:
                     private_key=dydx_private_key or None,
                     node_url=dydx_node_url,
                     env=dydx_env,
+                )
+            elif v2 == "okx":
+                okx_key = os.getenv("OKX_API_KEY", "").strip()
+                okx_secret = os.getenv("OKX_API_SECRET", "").strip()
+                okx_passphrase = os.getenv("OKX_PASSPHRASE", "").strip()
+                okx_is_demo = os.getenv("OKX_IS_DEMO", "false").lower() in ("true", "1", "yes")
+
+                if not okx_key:
+                    missing.append("OKX_API_KEY")
+                if not okx_secret:
+                    missing.append("OKX_API_SECRET")
+                if not okx_passphrase:
+                    missing.append("OKX_PASSPHRASE")
+
+                if missing:
+                    err_msg = f"Falten credencials per al mode LIVE amb OKX: {', '.join(missing)}"
+                    logger.error(err_msg)
+                    raise ValueError(err_msg)
+
+                venue2_client = OkxLiveClient(
+                    api_key=okx_key,
+                    api_secret=okx_secret,
+                    passphrase=okx_passphrase,
+                    is_demo=okx_is_demo,
                 )
             else:
                 aevo_key = os.getenv("AEVO_API_KEY", "").strip()
@@ -223,6 +251,7 @@ class ArbitrageTradingBotApp:
             target_exit_spread_pct=exit_spread,
             max_book_spread_pct=max_book_spread,
             maker_first=self.maker_first,
+            venue2_name=self.venue2.upper(),
         )
         self.carry_strategy = FundingCarryStrategy(
             min_entry_apr=self.min_carry_apr,
@@ -245,6 +274,13 @@ class ArbitrageTradingBotApp:
                 coins=self.coins,
                 on_book_update=self.handle_venue2_book,
                 on_funding_update=self.handle_venue2_funding,
+            )
+        elif self.venue2 == "okx":
+            self.venue2_ws = OkxWSClient(
+                coins=self.coins,
+                on_book_update=self.handle_venue2_book,
+                on_funding_update=self.handle_venue2_funding,
+                is_demo=os.getenv("OKX_IS_DEMO", "false").lower() in ("true", "1", "yes"),
             )
         elif self.venue2 == "vertex":
             self.venue2_ws = VertexWSClient(
@@ -904,7 +940,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + Aevo / Vertex / dYdX / Binance)")
     parser.add_argument("--mode", choices=["arbitrage", "funding_carry", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (spread scalping), 'funding_carry' (carry trade passiu de funding), o 'scalper'")
-    parser.add_argument("--venue2", choices=["aevo", "vertex", "dydx", "binance"], default=venue2_default, help="Segon exchange per a l'arbitratge: 'aevo' (DEX d'alta freqüència), 'vertex' (0%% Maker Fee), 'dydx' o 'binance'")
+    parser.add_argument("--venue2", choices=["aevo", "vertex", "dydx", "binance", "okx"], default=venue2_default, help="Segon exchange per a l'arbitratge: 'aevo', 'okx' (CEX institucional), 'vertex', 'dydx' o 'binance'")
     parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL)")
     parser.add_argument("--maker-first", action="store_true", default=os.getenv("MAKER_FIRST", "false").lower() in ("true", "1", "yes"), help="Activar execució Maker-First a Hyperliquid per minimitzar comissions d'arbitratge")
     parser.add_argument("--initial-balance", type=float, default=initial_balance_default, help="Capital inicial total en dòlars (default: 1000.0$)")
@@ -947,6 +983,12 @@ def main():
                 "ETH", "BTC", "SOL", "SUI", "NEAR", "LINK", "AVAX",
                 "ARB", "OP", "APT", "SEI", "TIA", "RENDER", "INJ",
                 "ENA", "DOGE", "WIF", "AAVE", "UNI"
+            ]
+            coins = default_coins
+        elif args.venue2 == "okx":
+            default_coins = [
+                "BTC", "ETH", "SOL", "SUI", "NEAR", "AVAX", "LINK",
+                "DOGE", "ARB", "OP", "APT", "SEI", "INJ", "UNI"
             ]
             coins = default_coins
         elif args.venue2 == "vertex":

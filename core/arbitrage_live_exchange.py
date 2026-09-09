@@ -35,6 +35,9 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         if v2_name == "DYDX":
             bn_maker_fee = 0.00010
             bn_taker_fee = 0.00050
+        elif v2_name == "OKX":
+            bn_maker_fee = 0.00020
+            bn_taker_fee = 0.00050
         else:
             bn_maker_fee = 0.00030
             bn_taker_fee = 0.00050
@@ -225,7 +228,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
             logger.info(
                 f"Saldos reals sincronitzats: Hyperliquid = {self.hl_balance_usd:.2f}$ | "
-                f"Aevo = {self.bn_balance_usd:.2f}$ | Total = {self.total_balance_usd:.2f}$"
+                f"{self.venue2_name} = {self.bn_balance_usd:.2f}$ | Total = {self.total_balance_usd:.2f}$"
             )
             await self.reconcile_active_positions()
             if self.hl_client.referral_code:
@@ -318,6 +321,18 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
             hl_sz = self.hl_client.round_size(coin, size_usd / signal.hl_price)
             aevo_sz = self.aevo_client.round_size(coin, size_usd / signal.bn_price)
+
+            if self.venue2_name == "OKX":
+                # A OKX operem en múltiples discrets de contractes (ctVal).
+                # Alineem la mida de Hyperliquid amb la dels contractes OKX per garantir neutralitat delta perfecta.
+                hl_sz = self.hl_client.round_size(coin, aevo_sz)
+
+            if hl_sz <= 0 or aevo_sz <= 0:
+                logger.warning(
+                    f"⚠️ [MIDA INVALIDA] Mida calculada no vàlida per a {coin}: "
+                    f"HL={hl_sz}, {self.venue2_name}={aevo_sz}. Cancel·lant ordre."
+                )
+                return
 
             logger.info(
                 f"🚀 [EXECUCIÓ REAL ENVIANT] {coin} {signal.direction.value} | "
