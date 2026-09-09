@@ -1238,11 +1238,14 @@ class WebDashboardServer:
                             bal_calc = await client.get_account_balance()
                             fund_calc = await client.get_funding_balance()
                             pos_calc = await client.get_positions()
+                            cfg_res = await client._request("GET", "/api/v5/account/config")
+                            acct_cfg = cfg_res.get("data", [{}])[0] if cfg_res.get("code") == "0" else {}
                             probe_results[tag]["trading_total"] = bal_calc.get("total", 0.0)
                             probe_results[tag]["funding_total"] = fund_calc.get("total_usd", 0.0)
                             probe_results[tag]["trading_currencies"] = bal_calc.get("currencies", {})
                             probe_results[tag]["funding_currencies"] = fund_calc.get("currencies", {})
                             probe_results[tag]["positions"] = pos_calc
+                            probe_results[tag]["account_config"] = acct_cfg
                             if not active_match:
                                 active_match = {
                                     "domain": domain,
@@ -1253,6 +1256,7 @@ class WebDashboardServer:
                                     "trading_currencies": bal_calc.get("currencies", {}) or fund_calc.get("currencies", {}),
                                     "funding_currencies": fund_calc.get("currencies", {}),
                                     "trading_code": t_code,
+                                    "account_config": acct_cfg,
                                 }
                                 matched_positions = pos_calc
                                 break  # Trobat amb èxit!
@@ -1266,6 +1270,9 @@ class WebDashboardServer:
                     "total_equity_usd": round(active_match.get("trading_total", 0.0), 2) if active_match else 0.0,
                     "available_balance_usd": round(active_match.get("trading_total", 0.0), 2) if active_match else 0.0,
                     "funding_total_usd": round(active_match.get("funding_total", 0.0), 2) if active_match else 0.0,
+                    "account_level": active_match.get("account_config", {}).get("acctLv", "N/A"),
+                    "pos_mode": active_match.get("account_config", {}).get("posMode", "N/A"),
+                    "account_config": active_match.get("account_config", {}),
                     "trading_currencies": active_match.get("trading_currencies", {}) if active_match else {},
                     "funding_currencies": active_match.get("funding_currencies", {}) if active_match else {},
                     "open_positions_count": len(matched_positions),

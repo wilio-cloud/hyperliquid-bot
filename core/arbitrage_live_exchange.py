@@ -338,6 +338,17 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 )
                 return
 
+            # Protecció estricta de límit màxim de capital per ordre de prova
+            actual_order_usd = max(hl_sz * signal.hl_price, aevo_sz * signal.bn_price)
+            max_allowed_usd = max(size_usd * 1.35, 40.0)
+            if actual_order_usd > max_allowed_usd:
+                logger.warning(
+                    f"⚠️ [MIDA EXCESSIVA] L'ordre mínima de {coin} requeriria {actual_order_usd:.1f}$, "
+                    f"que supera el límit configurat ({size_usd:.1f}$, límit segur {max_allowed_usd:.1f}$). "
+                    f"Cancel·lant entrada per protegir el capital."
+                )
+                return
+
             logger.info(
                 f"🚀 [EXECUCIÓ REAL ENVIANT] {coin} {signal.direction.value} | "
                 f"HL: {'BUY' if hl_is_buy else 'SELL'} {hl_sz} @ {signal.hl_price} | "

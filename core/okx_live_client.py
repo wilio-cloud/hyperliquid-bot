@@ -79,6 +79,9 @@ class OkxLiveClient:
         self._ssl_context = get_ssl_context()
         self.contract_specs: Dict[str, dict] = {}
         self._specs_initialized = False
+        self.pos_mode: str = "net_mode"
+        self.acct_lv: str = "2"
+        self.account_config: dict = {}
 
     def is_ready_to_trade(self) -> bool:
         """Comprova si les credencials d'OKX estan degudament configurades."""
@@ -159,9 +162,23 @@ class OkxLiveClient:
             return {"code": "-1", "msg": str(e), "data": []}
 
     async def init_contract_specs(self):
-        """Descarrega les especificacions de cada contracte (ctVal, tickSz) des d'OKX."""
+        """Descarrega les especificacions de cada contracte (ctVal, tickSz) i la configuració del compte des d'OKX."""
         if self._specs_initialized:
             return
+
+        # 1. Carregar configuració del compte (posMode, acctLv) si tenim credencials
+        if self.is_ready_to_trade():
+            try:
+                cfg_res = await self._request("GET", "/api/v5/account/config")
+                if cfg_res.get("code") == "0" and cfg_res.get("data"):
+                    self.account_config = cfg_res["data"][0]
+                    self.pos_mode = self.account_config.get("posMode", "net_mode")
+                    self.acct_lv = self.account_config.get("acctLv", "2")
+                    logger.info(f"Configuració OKX carregada: posMode={self.pos_mode}, acctLv={self.acct_lv}")
+            except Exception as ce:
+                logger.debug(f"Error consultant account/config OKX: {ce}")
+
+        # 2. Descarregar instruments SWAP
         try:
             res = await self._request("GET", "/api/v5/public/instruments", params={"instType": "SWAP"})
             if res.get("code") == "0":
@@ -190,9 +207,12 @@ class OkxLiveClient:
         return self.DEFAULT_CT_VAL.get(c, 1.0)
 
     def to_contract_size(self, coin: str, size: float) -> int:
-        """Converteix la mida en unitats de moneda base al nombre enter de contractes d'OKX."""
+        """
+        Converteix la mida en unitats de moneda base al nombre enter de contractes d'OKX.
+        Si la mida és inferior a mig contracte, retorna 0 per evitar sobredimensionar ordres (ex: BTC/ETH en proves micro).
+        """
         ct_val = self.get_contract_val(coin)
-        return max(1, int(round(size / ct_val)))
+        return int(round(size / ct_val))
 
     def round_size(self, coin: str, theoretical_size: float) -> float:
         """
@@ -301,15 +321,27 @@ class OkxLiveClient:
 
     async def set_leverage(self, coin: str, leverage: int = 2) -> dict:
         """Configura el palanquejament creuat (Cross Margin) a OKX per a la moneda."""
+        await self.init_contract_specs()
         inst_id = f"{coin.upper()}-USDT-SWAP"
         payload = {
             "instId": inst_id,
             "lever": str(leverage),
             "mgnMode": "cross",
         }
-        res = await self._request("POST", "/api/v5/account/set-leverage", data=payload)
-        logger.debug(f"Palanquejament OKX per {coin} a {leverage}x: {res.get('msg', OK)}")
-        return res
+        if self.pos_mode == "long_short_mode":
+            payload["posSide"] = "long"
+            res_l = await self._request("POST", "/api/v5/account/set-leverage", data=payload)
+            payload["posSide"] = "short"
+            res_s = await self._request("POST", "/api/v5/account/set-leverage", data=payload)
+            return res_l if res_l.get("code") == "0" else res_s
+        else:
+            payload["posSide"] = "net"
+            res = await self._request("POST", "/api/v5/account/set-leverage", data=payload)
+            if res.get("code") != "0":
+                payload.pop("posSide", None)
+                res = await self._request("POST", "/api/v5/account/set-leverage", data=payload)
+            logger.debug(f"Palanquejament OKX per {coin} a {leverage}x: {res.get('msg', 'OK')}")
+            return res
 
     async def place_order(
         self,
@@ -337,6 +369,15 @@ class OkxLiveClient:
         contracts = max(1, int(round(size / ct_val)))
         rounded_px = self.round_price(coin, price)
 
+        # Determinar posSide segons la configuració del compte
+        if self.pos_mode == "long_short_mode":
+            if reduce_only:
+                pos_side = "long" if not is_buy else "short"
+            else:
+                pos_side = "long" if is_buy else "short"
+        else:
+            pos_side = "net"
+
         payload = {
             "instId": inst_id,
             "tdMode": "cross",
@@ -344,7 +385,7 @@ class OkxLiveClient:
             "ordType": ord_type,
             "sz": str(contracts),
             "px": str(rounded_px),
-            "posSide": "net",
+            "posSide": pos_side,
         }
         if reduce_only:
             payload["reduceOnly"] = True
