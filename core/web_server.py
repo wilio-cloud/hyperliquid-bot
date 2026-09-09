@@ -1240,16 +1240,12 @@ class WebDashboardServer:
                             pos_calc = await client.get_positions()
                             cfg_res = await client._request("GET", "/api/v5/account/config")
                             acct_cfg = cfg_res.get("data", [{}])[0] if cfg_res.get("code") == "0" else {}
-                            lev_usdt = await client.set_leverage("NEAR", leverage=2)
-                            lev_usdc = await client._request("POST", "/api/v5/account/set-leverage", data={"instId": "NEAR-USDC-SWAP", "lever": "2", "mgnMode": "cross"})
                             probe_results[tag]["trading_total"] = bal_calc.get("total", 0.0)
                             probe_results[tag]["funding_total"] = fund_calc.get("total_usd", 0.0)
                             probe_results[tag]["trading_currencies"] = bal_calc.get("currencies", {})
                             probe_results[tag]["funding_currencies"] = fund_calc.get("currencies", {})
                             probe_results[tag]["positions"] = pos_calc
                             probe_results[tag]["account_config"] = acct_cfg
-                            probe_results[tag]["test_leverage_usdt"] = lev_usdt
-                            probe_results[tag]["test_leverage_usdc"] = lev_usdc
                             if not active_match:
                                 active_match = {
                                     "domain": domain,
@@ -1261,8 +1257,6 @@ class WebDashboardServer:
                                     "funding_currencies": fund_calc.get("currencies", {}),
                                     "trading_code": t_code,
                                     "account_config": acct_cfg,
-                                    "test_leverage_usdt": lev_usdt,
-                                    "test_leverage_usdc": lev_usdc,
                                 }
                                 matched_positions = pos_calc
                                 break  # Trobat amb èxit!
@@ -1279,8 +1273,6 @@ class WebDashboardServer:
                     "account_level": active_match.get("account_config", {}).get("acctLv", "N/A"),
                     "pos_mode": active_match.get("account_config", {}).get("posMode", "N/A"),
                     "account_config": active_match.get("account_config", {}),
-                    "test_leverage_usdt": active_match.get("test_leverage_usdt", {}),
-                    "test_leverage_usdc": active_match.get("test_leverage_usdc", {}),
                     "trading_currencies": active_match.get("trading_currencies", {}) if active_match else {},
                     "funding_currencies": active_match.get("funding_currencies", {}) if active_match else {},
                     "open_positions_count": len(matched_positions),
