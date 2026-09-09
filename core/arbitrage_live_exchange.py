@@ -274,6 +274,10 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         maker_first: Optional[bool] = None,
     ) -> Optional[ArbitragePosition]:
         """Inicia l'execució atòmica d'obertura en segon pla."""
+        if getattr(self, "trading_paused", False):
+            logger.debug(f"Trading pausat per l'usuari. Omissió d'obertura per a {signal.coin}.")
+            return None
+
         if self.has_open_position(signal.coin) or signal.coin in self._pending_opens:
             logger.debug(f"Ja hi ha posició o execució en curs per {signal.coin}.")
             return None
@@ -695,6 +699,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
     async def close_all_live_positions(self) -> Dict[str, Any]:
         """Tanca a mercat TOTS els contractes oberts a Hyperliquid i Aevo per deixar els comptes 100% plans."""
+        self.trading_paused = True
         v2_key = f"{self.venue2_name.lower()}_closed"
         results = {"hl_closed": [], "aevo_closed": [], v2_key: []}
         try:

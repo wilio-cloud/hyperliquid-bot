@@ -350,3 +350,28 @@ def test_time_exit_rotation_and_deadlock_prevention():
     assert exit_decision is not None
     reason, _, _ = exit_decision
     assert reason in ("TIME_ROTATION_BREAKEVEN", "TIME_SLOT_FREE", "CONVERGENCE_TARGET", "TAKE_PROFIT_TARGET")
+
+
+def test_trading_paused_prevents_new_positions():
+    """Valida que el mode de pausa de trading bloquegi noves entrades per permetre transferència de fons."""
+    from core.arbitrage_paper_exchange import ArbitragePaperExchange
+
+    exchange = ArbitragePaperExchange(
+        initial_hl_balance=500.0,
+        initial_bn_balance=500.0,
+    )
+    assert exchange.trading_paused is False
+
+    exchange.trading_paused = True
+    sig = ArbitrageSignal(
+        coin="SOL",
+        direction=ArbitrageDirection.BUY_HL_SELL_BN,
+        hl_price=140.0,
+        bn_price=140.5,
+        spread_pct=0.35,
+        strategy_name="CROSS_ARBITRAGE",
+    )
+    pos = exchange.open_arbitrage_position(sig, size_usd=100.0)
+    assert pos is None
+    assert len(exchange.active_positions) == 0
+    assert exchange.metrics["trading_paused"] is True

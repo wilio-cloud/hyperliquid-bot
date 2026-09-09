@@ -916,6 +916,10 @@ class WebDashboardServer:
         self.app.router.add_get("/api/diag", self.handle_diag)
         self.app.router.add_get("/api/close_all", self.handle_close_all)
         self.app.router.add_post("/api/close_all", self.handle_close_all)
+        self.app.router.add_get("/api/pause", self.handle_pause)
+        self.app.router.add_post("/api/pause", self.handle_pause)
+        self.app.router.add_get("/api/resume", self.handle_resume)
+        self.app.router.add_post("/api/resume", self.handle_resume)
         self.app.router.add_get("/api/set_leverage", self.handle_set_leverage)
         self.app.router.add_post("/api/set_leverage", self.handle_set_leverage)
         self.runner = None
@@ -1226,6 +1230,18 @@ class WebDashboardServer:
             res = await self.exchange.close_all_live_positions()
             return web.json_response(res)
         return web.json_response({"status": "err", "error": "close_all_live_positions not available"})
+
+    async def handle_pause(self, request):
+        if hasattr(self.exchange, "trading_paused"):
+            self.exchange.trading_paused = True
+            return web.json_response({"status": "ok", "trading_paused": True})
+        return web.json_response({"status": "err", "error": "trading_paused not available"})
+
+    async def handle_resume(self, request):
+        if hasattr(self.exchange, "trading_paused"):
+            self.exchange.trading_paused = False
+            return web.json_response({"status": "ok", "trading_paused": False})
+        return web.json_response({"status": "err", "error": "trading_paused not available"})
 
     async def handle_set_leverage(self, request):
         lev_str = request.query.get("leverage", "2")

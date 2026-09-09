@@ -76,6 +76,7 @@ class ArbitragePaperExchange:
         self.equity_history: List[dict] = []
         self.state_file: Optional[str] = state_file
 
+        self.trading_paused: bool = os.environ.get("PAUSE_TRADING", "false").lower() in ("true", "1", "yes")
         # Carrega l'estat previ si s'ha definit un fitxer d'estat
         if self.state_file:
             self.load_state()
@@ -103,6 +104,10 @@ class ArbitragePaperExchange:
         maker_first: Optional[bool] = None,
     ) -> Optional[ArbitragePosition]:
         """Simula l'obertura simultània (o Maker-First) de les dues potes d'arbitratge."""
+        if getattr(self, "trading_paused", False):
+            logger.debug(f"Trading pausat per l'usuari. Omissió d'obertura per a {signal.coin}.")
+            return None
+
         if self.has_open_position(signal.coin):
             logger.debug(f"Ja hi ha una posició oberta per {signal.coin}. Omissió.")
             return None
@@ -465,6 +470,7 @@ class ArbitragePaperExchange:
             "winrate_pct": winrate,
             "profit_factor": profit_factor,
             "active_positions_count": len(self.active_positions),
+            "trading_paused": self.trading_paused,
             "equity_history": self.equity_history,
             "execution_mode": "paper",
             "maker_first": getattr(self, "maker_first", False),
