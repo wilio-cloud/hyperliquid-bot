@@ -58,6 +58,23 @@ class OkxLiveClient:
         "ENA": 10.0,
     }
 
+    DEFAULT_XPERP_CT_VAL: Dict[str, float] = {
+        "BTC": 0.0001,
+        "ETH": 0.001,
+        "SOL": 0.01,
+        "AVAX": 10.0,
+        "LINK": 1.0,
+        "NEAR": 1.0,
+        "SUI": 1.0,
+        "DOGE": 10.0,
+        "ARB": 10.0,
+        "OP": 1.0,
+        "APT": 1.0,
+        "SEI": 10.0,
+        "INJ": 0.1,
+        "UNI": 1.0,
+    }
+
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -78,6 +95,8 @@ class OkxLiveClient:
         self.base_url = (base_url or os.environ.get("OKX_REST_URL", default_base_url)).strip().rstrip("/")
         self._ssl_context = get_ssl_context()
         self.contract_specs: Dict[str, dict] = {}
+        self.symbol_map: Dict[str, str] = {}
+        self.reverse_map: Dict[str, str] = {}
         self._specs_initialized = False
         self.pos_mode: str = "net_mode"
         self.acct_lv: str = "2"
@@ -161,6 +180,15 @@ class OkxLiveClient:
             logger.error(f"Error HTTP en petició OKX ({method} {path}): {e}")
             return {"code": "-1", "msg": str(e), "data": []}
 
+    def get_inst_id(self, coin: str) -> str:
+        """Retorna l'identificador d'instrument oficial d'OKX (X-Perp per a EEA o USDT-SWAP per a Global)."""
+        c = coin.upper()
+        if c in self.symbol_map:
+            return self.symbol_map[c]
+        if c in self.contract_specs and "instId" in self.contract_specs[c]:
+            return self.contract_specs[c]["instId"]
+        return f"{c}-USDT-SWAP"
+
     async def init_contract_specs(self):
         """Descarrega les especificacions de cada contracte (ctVal, tickSz) i la configuració del compte des d'OKX."""
         if self._specs_initialized:
@@ -178,7 +206,33 @@ class OkxLiveClient:
             except Exception as ce:
                 logger.debug(f"Error consultant account/config OKX: {ce}")
 
-        # 2. Descarregar instruments SWAP
+        is_eea = ("eea.okx.com" in self.base_url) or (os.environ.get("OKX_REGION", "eea").lower() == "eea")
+
+        # 2. Descarregar instruments FUTURES (per als contractes USD_UM_XPERP a Europa / EEA)
+        if is_eea:
+            try:
+                res_fut = await self._request("GET", "/api/v5/public/instruments", params={"instType": "FUTURES"})
+                if res_fut.get("code") == "0":
+                    for item in res_fut.get("data", []):
+                        inst_id = item.get("instId", "")
+                        if "XPERP" in inst_id and item.get("state") != "suspend":
+                            parts = inst_id.split("-")
+                            coin = parts[0].upper()
+                            if coin not in self.symbol_map:
+                                self.symbol_map[coin] = inst_id
+                                self.reverse_map[inst_id] = coin
+                                self.contract_specs[coin] = {
+                                    "instId": inst_id,
+                                    "ctVal": float(item.get("ctVal", self.DEFAULT_XPERP_CT_VAL.get(coin, 1.0))),
+                                    "minSz": float(item.get("minSz", 1.0)),
+                                    "lotSz": float(item.get("lotSz", 1.0)),
+                                    "tickSz": float(item.get("tickSz", 0.01)),
+                                }
+                    logger.info(f"Metadades de contractes OKX X-Perp REST carregades ({len(self.contract_specs)} monedes).")
+            except Exception as fe:
+                logger.debug(f"Error consultant instruments FUTURES OKX: {fe}")
+
+        # 3. Descarregar instruments SWAP (per a comptes globals o monedes sense X-Perp)
         try:
             res = await self._request("GET", "/api/v5/public/instruments", params={"instType": "SWAP"})
             if res.get("code") == "0":
@@ -188,14 +242,18 @@ class OkxLiveClient:
                     parts = inst_id.split("-")
                     if len(parts) >= 3 and parts[1] == "USDT":
                         coin = parts[0].upper()
-                        self.contract_specs[coin] = {
-                            "ctVal": float(item.get("ctVal", self.DEFAULT_CT_VAL.get(coin, 1.0))),
-                            "minSz": float(item.get("minSz", 1.0)),
-                            "lotSz": float(item.get("lotSz", 1.0)),
-                            "tickSz": float(item.get("tickSz", 0.01)),
-                        }
+                        if coin not in self.contract_specs:
+                            self.symbol_map[coin] = inst_id
+                            self.reverse_map[inst_id] = coin
+                            self.contract_specs[coin] = {
+                                "instId": inst_id,
+                                "ctVal": float(item.get("ctVal", self.DEFAULT_CT_VAL.get(coin, 1.0))),
+                                "minSz": float(item.get("minSz", 1.0)),
+                                "lotSz": float(item.get("lotSz", 1.0)),
+                                "tickSz": float(item.get("tickSz", 0.01)),
+                            }
                 self._specs_initialized = True
-                logger.info(f"Metadades de contractes OKX REST carregades ({len(self.contract_specs)} monedes).")
+                logger.info(f"Metadades totals de contractes OKX REST carregades ({len(self.contract_specs)} monedes).")
         except Exception as e:
             logger.debug(f"Error inicialitzant metadades de contractes OKX: {e}")
 
@@ -204,6 +262,9 @@ class OkxLiveClient:
         c = coin.upper()
         if c in self.contract_specs:
             return self.contract_specs[c]["ctVal"]
+        is_eea = ("eea.okx.com" in self.base_url) or (os.environ.get("OKX_REGION", "eea").lower() == "eea")
+        if is_eea and c in self.DEFAULT_XPERP_CT_VAL:
+            return self.DEFAULT_XPERP_CT_VAL[c]
         return self.DEFAULT_CT_VAL.get(c, 1.0)
 
     def to_contract_size(self, coin: str, size: float) -> int:
@@ -286,14 +347,16 @@ class OkxLiveClient:
         }
 
     async def get_positions(self) -> List[Dict[str, Any]]:
-        """Consulta les posicions perpètues obertes a OKX."""
-        res = await self._request("GET", "/api/v5/account/positions", params={"instType": "SWAP"})
+        """Consulta les posicions perpètues obertes a OKX (tant SWAP com X-Perp)."""
+        await self.init_contract_specs()
+        # Sense instType per consultar totes les posicions reals obertes
+        res = await self._request("GET", "/api/v5/account/positions")
         positions = []
         if res.get("code") == "0" and res.get("data"):
             for item in res["data"]:
                 inst_id = item.get("instId", "")
                 parts = inst_id.split("-")
-                coin = parts[0].upper() if len(parts) >= 1 else ""
+                coin = self.reverse_map.get(inst_id) or (parts[0].upper() if len(parts) >= 1 else "")
                 pos_contracts = float(item.get("pos", 0.0))
                 if pos_contracts == 0:
                     continue
@@ -315,6 +378,7 @@ class OkxLiveClient:
                     "side": side,
                     "avg_entry_price": float(item.get("avgPx", 0.0)),
                     "unrealized_pnl": float(item.get("upl", 0.0)),
+                    "instId": inst_id,
                     "raw": item,
                 })
         return positions
@@ -322,7 +386,7 @@ class OkxLiveClient:
     async def set_leverage(self, coin: str, leverage: int = 2) -> dict:
         """Configura el palanquejament creuat (Cross Margin) a OKX per a la moneda."""
         await self.init_contract_specs()
-        inst_id = f"{coin.upper()}-USDT-SWAP"
+        inst_id = self.get_inst_id(coin)
         payload = {
             "instId": inst_id,
             "lever": str(leverage),
@@ -340,7 +404,7 @@ class OkxLiveClient:
             if res.get("code") != "0":
                 payload.pop("posSide", None)
                 res = await self._request("POST", "/api/v5/account/set-leverage", data=payload)
-            logger.debug(f"Palanquejament OKX per {coin} a {leverage}x: {res.get('msg', 'OK')}")
+            logger.debug(f"Palanquejament OKX per {coin} ({inst_id}) a {leverage}x: {res.get('msg', 'OK')}")
             return res
 
     async def place_order(
@@ -355,7 +419,7 @@ class OkxLiveClient:
     ) -> dict:
         """Envia una ordre límit, post-only o IOC a OKX."""
         await self.init_contract_specs()
-        inst_id = f"{coin.upper()}-USDT-SWAP"
+        inst_id = self.get_inst_id(coin)
         side = "buy" if is_buy else "sell"
 
         if post_only:
@@ -391,7 +455,7 @@ class OkxLiveClient:
             payload["reduceOnly"] = True
 
         logger.info(
-            f"📤 Enviant ordre OKX V5: {coin} {side.upper()} {contracts} cts (~{contracts*ct_val} {coin}) @ {rounded_px} "
+            f"📤 Enviant ordre OKX V5: {coin} ({inst_id}) {side.upper()} {contracts} cts (~{contracts*ct_val} {coin}) @ {rounded_px} "
             f"(Type={ord_type}, ReduceOnly={reduce_only})..."
         )
 
@@ -412,6 +476,7 @@ class OkxLiveClient:
                         "avg_price": rounded_px,
                         "size": contracts * ct_val,
                         "ordId": ord_id,
+                        "instId": inst_id,
                     },
                 }
             else:
@@ -425,13 +490,24 @@ class OkxLiveClient:
 
     async def market_close(self, coin: str, size: float) -> dict:
         """Tanca immediatament una posició oberta a OKX mitjançant l'endpoint close-position."""
-        inst_id = f"{coin.upper()}-USDT-SWAP"
+        await self.init_contract_specs()
+        inst_id = self.get_inst_id(coin)
+        pos_side = "net"
+        if self.pos_mode == "long_short_mode":
+            try:
+                positions = await self.get_positions()
+                for p in positions:
+                    if p.get("coin") == coin.upper():
+                        pos_side = "long" if p.get("side") == "buy" else "short"
+                        break
+            except Exception:
+                pass
         payload = {
             "instId": inst_id,
             "mgnMode": "cross",
-            "posSide": "net",
+            "posSide": pos_side,
         }
-        logger.info(f"🚨 Tancant posició restant a OKX: {coin}...")
+        logger.info(f"🚨 Tancant posició restant a OKX: {coin} ({inst_id}, posSide={pos_side})...")
         res = await self._request("POST", "/api/v5/trade/close-position", data=payload)
         if res.get("code") == "0":
             return {"status": "ok", "data": res.get("data", [])}
@@ -440,7 +516,8 @@ class OkxLiveClient:
     async def cancel_all_orders(self, coin: Optional[str] = None) -> dict:
         """Cancel·la totes les ordres pendents per a un instrument o globalment."""
         if coin:
-            inst_id = f"{coin.upper()}-USDT-SWAP"
+            await self.init_contract_specs()
+            inst_id = self.get_inst_id(coin)
             # Consulta ordres pendents
             pending = await self._request("GET", "/api/v5/trade/orders-pending", params={"instId": inst_id})
             if pending.get("code") == "0" and pending.get("data"):

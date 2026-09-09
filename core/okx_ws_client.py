@@ -59,6 +59,23 @@ class OkxWSClient:
         "ENA": 10.0,
     }
 
+    DEFAULT_XPERP_CT_VAL: Dict[str, float] = {
+        "BTC": 0.0001,
+        "ETH": 0.001,
+        "SOL": 0.01,
+        "AVAX": 10.0,
+        "LINK": 1.0,
+        "NEAR": 1.0,
+        "SUI": 1.0,
+        "DOGE": 10.0,
+        "ARB": 10.0,
+        "OP": 1.0,
+        "APT": 1.0,
+        "SEI": 10.0,
+        "INJ": 0.1,
+        "UNI": 1.0,
+    }
+
     def __init__(
         self,
         coins: Optional[List[str]] = None,
@@ -71,8 +88,8 @@ class OkxWSClient:
         self.on_funding_update = on_funding_update
         self.is_demo = is_demo or (os.environ.get("OKX_IS_DEMO", "false").lower() in ("1", "true", "yes"))
 
-        self.symbol_map = {c.upper(): f"{c.upper()}-USDT-SWAP" for c in self.coins}
-        self.reverse_map = {f"{c.upper()}-USDT-SWAP": c.upper() for c in self.coins}
+        self.symbol_map: Dict[str, str] = {c.upper(): f"{c.upper()}-USDT-SWAP" for c in self.coins}
+        self.reverse_map: Dict[str, str] = {f"{c.upper()}-USDT-SWAP": c.upper() for c in self.coins}
 
         self.order_books: Dict[str, OrderBookL2] = {}
         self.funding_rates_8h: Dict[str, float] = {}
@@ -84,12 +101,13 @@ class OkxWSClient:
         self._funding_poll_task: Optional[asyncio.Task] = None
         self._ssl_context = get_ssl_context()
 
+        default_rest_url = "https://eea.okx.com" if os.environ.get("OKX_REGION", "eea").lower() == "eea" else "https://www.okx.com"
+        self.rest_url = os.environ.get("OKX_REST_URL", default_rest_url).rstrip("/")
+
         if self.is_demo:
             self.ws_url = "wss://wspap.okx.com:8443/ws/v5/public?brokerId=9999"
-            self.rest_url = "https://www.okx.com"
         else:
             self.ws_url = "wss://ws.okx.com:8443/ws/v5/public"
-            self.rest_url = "https://www.okx.com"
 
     async def start(self):
         """Inicia la connexió WebSocket i tasques de fons."""
@@ -110,32 +128,70 @@ class OkxWSClient:
                     pass
 
     async def _fetch_instrument_specs(self):
-        """Descarrega les especificacions de mida de contracte (ctVal) des de la REST API d'OKX."""
-        url = f"{self.rest_url}/api/v5/public/instruments?instType=SWAP"
+        """Descarrega les especificacions dels instruments (X-Perp a EEA o SWAP a Global) des d'OKX."""
+        is_eea = ("eea.okx.com" in self.rest_url) or (os.environ.get("OKX_REGION", "eea").lower() == "eea")
+
+        # 1. Si som a EEA, consultar primer instruments FUTURES per trobar els contractes X-Perps oficials
+        if is_eea:
+            url_fut = f"{self.rest_url}/api/v5/public/instruments?instType=FUTURES"
+            try:
+                async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self._ssl_context)) as session:
+                    async with session.get(url_fut, timeout=aiohttp.ClientTimeout(total=6.0)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            for item in data.get("data", []):
+                                inst_id = item.get("instId", "")
+                                if "XPERP" in inst_id and item.get("state") != "suspend":
+                                    parts = inst_id.split("-")
+                                    coin = parts[0].upper()
+                                    if coin in self.coins:
+                                        self.symbol_map[coin] = inst_id
+                                        self.reverse_map[inst_id] = coin
+                                        self.contract_specs[coin] = {
+                                            "instId": inst_id,
+                                            "ctVal": float(item.get("ctVal", self.DEFAULT_XPERP_CT_VAL.get(coin, 1.0))),
+                                            "minSz": float(item.get("minSz", 1.0)),
+                                            "lotSz": float(item.get("lotSz", 1.0)),
+                                            "tickSz": float(item.get("tickSz", 0.01)),
+                                        }
+                            logger.info(f"Metadades X-Perp OKX WebSocket carregades per a {len(self.contract_specs)} monedes.")
+            except Exception as e:
+                logger.debug(f"Error consultant instruments FUTURES OKX WS: {e}")
+
+        # 2. Descarregar instruments SWAP per a les monedes globals o restants
+        url_swap = f"{self.rest_url}/api/v5/public/instruments?instType=SWAP"
         try:
             async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self._ssl_context)) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=6.0)) as resp:
+                async with session.get(url_swap, timeout=aiohttp.ClientTimeout(total=6.0)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         for item in data.get("data", []):
                             inst_id = item.get("instId", "")
-                            coin = self.reverse_map.get(inst_id)
-                            if coin:
-                                self.contract_specs[coin] = {
-                                    "ctVal": float(item.get("ctVal", self.DEFAULT_CT_VAL.get(coin, 1.0))),
-                                    "minSz": float(item.get("minSz", 1.0)),
-                                    "lotSz": float(item.get("lotSz", 1.0)),
-                                    "tickSz": float(item.get("tickSz", 0.01)),
-                                }
-                        logger.info(f"Metadades de contractes OKX carregades per a {len(self.contract_specs)} monedes.")
+                            parts = inst_id.split("-")
+                            if len(parts) >= 3 and parts[1] == "USDT":
+                                coin = parts[0].upper()
+                                if coin in self.coins and coin not in self.contract_specs:
+                                    self.symbol_map[coin] = inst_id
+                                    self.reverse_map[inst_id] = coin
+                                    self.contract_specs[coin] = {
+                                        "instId": inst_id,
+                                        "ctVal": float(item.get("ctVal", self.DEFAULT_CT_VAL.get(coin, 1.0))),
+                                        "minSz": float(item.get("minSz", 1.0)),
+                                        "lotSz": float(item.get("lotSz", 1.0)),
+                                        "tickSz": float(item.get("tickSz", 0.01)),
+                                    }
+                        logger.info(f"Metadades de contractes OKX WebSocket carregades per a {len(self.contract_specs)} monedes.")
         except Exception as e:
-            logger.debug(f"Error descarregant metadades de contractes OKX (utilitzant valors per defecte): {e}")
+            logger.debug(f"Error descarregant metadades de contractes OKX: {e}")
 
     def get_contract_val(self, coin: str) -> float:
         """Retorna el valor de 1 contracte en unitats de moneda base."""
         c = coin.upper()
         if c in self.contract_specs:
             return self.contract_specs[c]["ctVal"]
+        is_eea = ("eea.okx.com" in self.rest_url) or (os.environ.get("OKX_REGION", "eea").lower() == "eea")
+        if is_eea and c in self.DEFAULT_XPERP_CT_VAL:
+            return self.DEFAULT_XPERP_CT_VAL[c]
         return self.DEFAULT_CT_VAL.get(c, 1.0)
 
     async def _run_ws_loop(self):
@@ -157,7 +213,8 @@ class OkxWSClient:
                         inst_id = self.symbol_map.get(coin)
                         if inst_id:
                             sub_args.append({"channel": "books5", "instId": inst_id})
-                            sub_args.append({"channel": "funding-rate", "instId": inst_id})
+                            if "-SWAP" in inst_id:
+                                sub_args.append({"channel": "funding-rate", "instId": inst_id})
 
                     if sub_args:
                         sub_msg = {"op": "subscribe", "args": sub_args}
@@ -257,6 +314,9 @@ class OkxWSClient:
                 for coin in self.coins:
                     inst_id = self.symbol_map.get(coin)
                     if not inst_id:
+                        continue
+                    if "-SWAP" not in inst_id:
+                        self.funding_rates_8h[coin] = 0.0
                         continue
                     full_url = f"{url}?instId={inst_id}"
                     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self._ssl_context)) as session:

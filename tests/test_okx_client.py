@@ -7,7 +7,17 @@ import hmac
 import json
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
+try:
+    import pytest
+except ImportError:
+    class _MockPytest:
+        @staticmethod
+        def approx(val, rel=1e-4):
+            class _ApproxVal:
+                def __eq__(self, other):
+                    return abs(other - val) <= max(abs(val) * rel, 1e-6)
+            return _ApproxVal()
+    pytest = _MockPytest()
 
 from core.arbitrage_live_exchange import ArbitrageLiveExchange
 from core.arbitrage_models import ArbitrageDirection, ArbitragePosition, ArbitrageSignal
@@ -375,3 +385,59 @@ def test_trading_paused_prevents_new_positions():
     assert pos is None
     assert len(exchange.active_positions) == 0
     assert exchange.metrics["trading_paused"] is True
+
+
+def test_okx_xperp_discovery_and_order():
+    """Valida el mapeig dinàmic d'instruments X-Perp a Europa (EEA) i l'execució d'ordres amb get_inst_id."""
+    async def _test():
+        client = OkxLiveClient("k", "s", "p", base_url="https://eea.okx.com")
+
+        mock_fut_res = {
+            "code": "0",
+            "data": [
+                {
+                    "instId": "NEAR-USD_UM_XPERP-310613",
+                    "ctVal": "1",
+                    "minSz": "1",
+                    "lotSz": "1",
+                    "tickSz": "0.001",
+                    "state": "live",
+                },
+                {
+                    "instId": "BTC-USD_UM_XPERP-310404",
+                    "ctVal": "0.0001",
+                    "minSz": "1",
+                    "lotSz": "1",
+                    "tickSz": "0.1",
+                    "state": "live",
+                },
+            ],
+        }
+        mock_swap_res = {"code": "0", "data": []}
+
+        with patch.object(client, "_request", side_effect=[mock_fut_res, mock_swap_res]):
+            await client.init_contract_specs()
+
+            assert client.get_inst_id("NEAR") == "NEAR-USD_UM_XPERP-310613"
+            assert client.get_inst_id("BTC") == "BTC-USD_UM_XPERP-310404"
+            assert client.get_contract_val("NEAR") == 1.0
+            assert client.get_contract_val("BTC") == 0.0001
+
+            # Sizing per a micro-pressupost: 30$ a BTC @ 80.000$ = ~3 contractes (3 * 8$ = 24$)
+            assert client.to_contract_size("BTC", 0.000375) == 4
+            assert client.round_size("BTC", 0.000375) == 0.0004
+
+        # Test d'ordre utilitzant l'instrument X-Perp
+        mock_order_res = {
+            "code": "0",
+            "data": [{"ordId": "998877", "sCode": "0", "sMsg": ""}],
+        }
+        with patch.object(client, "_request", return_value=mock_order_res) as mock_req:
+            res = await client.place_order(coin="NEAR", is_buy=True, size=10.0, price=2.58)
+            assert res["status"] == "ok"
+            call_kwargs = mock_req.call_args[1]
+            assert call_kwargs["data"]["instId"] == "NEAR-USD_UM_XPERP-310613"
+            assert call_kwargs["data"]["sz"] == "10"
+            assert call_kwargs["data"]["px"] == "2.58"
+
+    asyncio.run(_test())

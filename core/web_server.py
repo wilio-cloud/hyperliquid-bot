@@ -1241,67 +1241,12 @@ class WebDashboardServer:
                             cfg_res = await client._request("GET", "/api/v5/account/config")
                             acct_cfg = cfg_res.get("data", [{}])[0] if cfg_res.get("code") == "0" else {}
                             
-                            # Consultar totes les posicions sense filtre d'instType
-                            all_pos_raw = await client._request("GET", "/api/v5/account/positions")
-                            all_pos_data = all_pos_raw.get("data", [])
-                            
-                            # Consultar instruments FUTURES (on estan els X-Perps a EEA)
-                            fut_raw = await client._request("GET", "/api/v5/public/instruments", params={"instType": "FUTURES"})
-                            fut_data = fut_raw.get("data", [])
-                            all_xperps = [i.get("instId") for i in fut_data if "XPERP" in i.get("instId", "")]
-                            near_xperps = [i.get("instId") for i in fut_data if "NEAR" in i.get("instId", "") and "XPERP" in i.get("instId", "")]
-                            near_inst = near_xperps[0] if near_xperps else "NEAR-USD_UM_XPERP-310404"
-                            
-                            # Prova d'ordre real sobre el contracte X-Perp
-                            test_xperp = await client._request(
-                                "POST",
-                                "/api/v5/trade/order",
-                                data={
-                                    "instId": near_inst,
-                                    "tdMode": "cross",
-                                    "side": "buy",
-                                    "ordType": "post_only",
-                                    "sz": "1",
-                                    "px": "0.5",
-                                    "posSide": "net",
-                                },
-                            )
-                            if test_xperp.get("code") == "0" and test_xperp.get("data"):
-                                oid = test_xperp["data"][0].get("ordId")
-                                if oid:
-                                    await client._request("POST", "/api/v5/trade/cancel-order", data={"instId": near_inst, "ordId": oid})
-
-                            # Provar funding rate i ticker del contracte X-Perp
-                            fr_res = await client._request("GET", "/api/v5/public/funding-rate-current", params={"instId": near_inst})
-                            ticker_res = await client._request("GET", "/api/v5/market/ticker", params={"instId": near_inst})
-
-                            # Mapa de monedes suportades amb X-Perp
-                            bot_coins = ["BTC", "ETH", "SOL", "AVAX", "LINK", "NEAR", "SUI", "DOGE", "ARB", "OP", "APT", "SEI", "INJ", "UNI"]
-                            mapped_coins = {}
-                            for c in bot_coins:
-                                matches = [i for i in fut_data if i.get("instId", "").startswith(f"{c}-USD_UM_XPERP")]
-                                if matches:
-                                    m = matches[0]
-                                    mapped_coins[c] = {
-                                        "instId": m.get("instId"),
-                                        "ctVal": m.get("ctVal"),
-                                        "ctValCcy": m.get("ctValCcy"),
-                                        "tickSz": m.get("tickSz"),
-                                        "lotSz": m.get("lotSz"),
-                                        "minSz": m.get("minSz"),
-                                        "settleCcy": m.get("settleCcy"),
-                                        "expTime": m.get("expTime"),
-                                    }
-
+                            await client.init_contract_specs()
                             probe_tests = {
-                                "all_positions_count": len(all_pos_data),
-                                "sample_positions": [{"instId": p.get("instId"), "pos": p.get("pos"), "mgnMode": p.get("mgnMode")} for p in all_pos_data[:5]],
-                                "near_xperp_inst": near_inst,
-                                "test_xperp_res": test_xperp,
-                                "fr_res": fr_res,
-                                "ticker_res": ticker_res,
-                                "total_xperps_count": len(all_xperps),
-                                "mapped_coins": mapped_coins,
+                                "all_positions_count": len(pos_calc),
+                                "positions": pos_calc,
+                                "symbol_map": client.symbol_map,
+                                "contract_specs_count": len(client.contract_specs),
                             }
                             probe_ord = probe_tests
 
