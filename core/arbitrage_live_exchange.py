@@ -21,7 +21,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         venue2_name: str = "AEVO",
         initial_hl_balance: float = 500.0,
         initial_bn_balance: float = 500.0,
-        leverage: float = 2.0,
+        leverage: float = 3.0,
         maker_first: bool = False,
         on_open_cb: Optional[Callable[[ArbitragePosition], None]] = None,
         on_close_cb: Optional[Callable[[ArbitragePosition, str, float], None]] = None,
@@ -303,7 +303,8 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
     async def configure_all_leverage(self, leverage: Optional[int] = None, coins: Optional[List[str]] = None) -> Dict[str, Any]:
         """Configura el palanquejament desitjat (ex: 2x) i Cross Margin a Hyperliquid i Venue2 per a tots els mercats."""
-        lev = int(leverage or self.leverage or 2)
+        lev = int(leverage or self.leverage or 3)
+        self.leverage = float(lev)
         results = {"status": "ok", "leverage": lev, "hl": {}, "aevo": {}}
         target_coins = coins or [
             "ETH", "BTC", "SOL", "SUI", "NEAR", "LINK", "AVAX",

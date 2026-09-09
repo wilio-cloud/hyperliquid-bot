@@ -20,7 +20,7 @@ class ArbitragePaperExchange:
         initial_hl_balance: float = 500.0,
         initial_bn_balance: float = 500.0,
         venue2_name: str = "AEVO",
-        leverage: float = 2.0,
+        leverage: float = 3.0,
         hl_maker_fee: float = 0.00015,  # 0.015% (Tier 0 base Hyperliquid)
         hl_taker_fee: float = 0.00045,  # 0.045%
         bn_maker_fee: Optional[float] = None,

@@ -62,12 +62,12 @@ class ArbitrageTradingBotApp:
         weekend_min_spread: float = 0.240,
         min_profit_usd: float = 0.25,
         exit_spread: float = 0.010,
-        size_usd: float = 200.0,
+        size_usd: float = 150.0,
         headless: bool = False,
         max_positions: int = 6,
         max_book_spread: Optional[float] = None,
         initial_balance: float = 1000.0,
-        leverage: float = 2.0,
+        leverage: float = 3.0,
         dynamic_size: bool = True,
         size_pct: float = 16.6,
         min_size_usd: float = 100.0,
@@ -931,10 +931,10 @@ def main():
     default_book_spread = "1.200" if venue2_default == "dydx" else "0.220"
     max_book_spread_default = float(os.environ.get("MAX_BOOK_SPREAD", default_book_spread))
     initial_balance_default = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
-    leverage_default = float(os.environ.get("LEVERAGE", "2.0"))
+    leverage_default = float(os.environ.get("LEVERAGE", "3.0"))
     dynamic_size_default = os.environ.get("DYNAMIC_SIZE", "true").lower() in ("true", "1", "yes")
     size_pct_default = float(os.environ.get("SIZE_PCT", "16.6"))
-    size_default = float(os.environ.get("SIZE", "200.0"))
+    size_default = float(os.environ.get("SIZE", "150.0"))
     min_size_default = float(os.environ.get("MIN_SIZE", "100.0"))
     max_size_default = float(os.environ.get("MAX_SIZE", "2500.0"))
 
@@ -944,8 +944,8 @@ def main():
     parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL)")
     parser.add_argument("--maker-first", action="store_true", default=os.getenv("MAKER_FIRST", "false").lower() in ("true", "1", "yes"), help="Activar execució Maker-First a Hyperliquid per minimitzar comissions d'arbitratge")
     parser.add_argument("--initial-balance", type=float, default=initial_balance_default, help="Capital inicial total en dòlars (default: 1000.0$)")
-    parser.add_argument("--leverage", type=float, default=leverage_default, help="Apalancament conservador per a l'arbitratge (default: 2.0x)")
-    parser.add_argument("--size", type=float, default=size_default, help="Mida en dòlars per ordre/pota (default: 250.0$)")
+    parser.add_argument("--leverage", type=float, default=leverage_default, help="Apalancament conservador per a l'arbitratge (default: 3.0x)")
+    parser.add_argument("--size", type=float, default=size_default, help="Mida en dòlars per ordre/pota (default: 150.0$)")
     parser.add_argument("--dynamic-size", dest="dynamic_size", action="store_true", default=dynamic_size_default, help="Ajustar automàticament la mida per interès compost (default: True)")
     parser.add_argument("--no-dynamic-size", dest="dynamic_size", action="store_false", help="Desactivar mida dinàmica i utilitzar mida fixa")
     parser.add_argument("--size-pct", type=float, default=size_pct_default, help="Percentatge del capital total per a cada ordre (default: 25.0%%)")

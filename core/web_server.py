@@ -72,6 +72,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .btn-pause:hover { opacity: 0.88; }
         .btn-resume { background: #10b981; color: #0b0f19; border: none; padding: 6px 14px; font-size: 0.78rem; font-weight: 700; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 6px; }
         .btn-resume:hover { opacity: 0.88; }
+        .btn-size { background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 3px 8px; border-radius: 5px; font-size: 0.72rem; font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
+        .btn-size:hover { background: #38bdf8; color: #0b0f19; border-color: #38bdf8; }
         .badge-paused { background: rgba(239, 68, 68, 0.25); color: #f87171; border: 1px solid #ef4444; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; display: none; }
     </style>
 </head>
@@ -89,7 +91,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <button class="btn-pause" id="btn-pause-toggle" onclick="toggleTradingPause()">⏸️ Pausar Trading</button>
-                    <span class="badge-strategy" id="mode-tag">DELTA-NEUTRAL ARB (2x)</span>
+                    <span class="badge-strategy" id="mode-tag">DELTA-NEUTRAL ARB (3x)</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px; margin-top: 2px;">
+                    <span style="font-size: 0.72rem; color: #94a3b8;">Mida/Ranura:</span>
+                    <button class="btn-size" onclick="setOrderSize(30)">30$</button>
+                    <button class="btn-size" onclick="setOrderSize(120)">120$</button>
+                    <button class="btn-size" onclick="setOrderSize(150)">150$</button>
+                    <button class="btn-size" onclick="promptCustomSize()">✏️</button>
                 </div>
                 <div style="font-size: 0.8rem; color: #94a3b8;" id="uptime">Carregant...</div>
             </div>
@@ -646,6 +655,25 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             updateChartData();
         }
 
+        async function setOrderSize(sz) {
+            try {
+                const r = await fetch(`/api/set_size?size=${sz}&dynamic=false`);
+                const d = await r.json();
+                if (d.status === 'ok') {
+                    fetchStatus();
+                }
+            } catch (err) {
+                console.error('Error setting size:', err);
+            }
+        }
+
+        function promptCustomSize() {
+            const val = prompt("Introdueix la nova mida en USD per ordre (ex: 150):", "150");
+            if (val && !isNaN(val)) {
+                setOrderSize(parseFloat(val));
+            }
+        }
+
         let isTradingPaused = false;
         async function toggleTradingPause() {
             const btn = document.getElementById('btn-pause-toggle');
@@ -975,9 +1003,12 @@ class WebDashboardServer:
         self.app.router.add_get("/api/pause", self.handle_pause)
         self.app.router.add_post("/api/pause", self.handle_pause)
         self.app.router.add_get("/api/resume", self.handle_resume)
-        self.app.router.add_post("/api/resume", self.handle_resume)
         self.app.router.add_get("/api/set_leverage", self.handle_set_leverage)
         self.app.router.add_post("/api/set_leverage", self.handle_set_leverage)
+        self.app.router.add_get("/api/set_size", self.handle_set_size)
+        self.app.router.add_post("/api/set_size", self.handle_set_size)
+        self.app.router.add_get("/api/set_max_positions", self.handle_set_max_positions)
+        self.app.router.add_post("/api/set_max_positions", self.handle_set_max_positions)
         self.runner = None
 
     async def handle_index(self, request):
@@ -1128,7 +1159,26 @@ class WebDashboardServer:
             "has_dydx_mnemonic": bool(dydx_mnemonic),
             "dydx_mnemonic_word_count": len(dydx_mnemonic.split()) if dydx_mnemonic else 0,
             "has_dydx_private_key": bool(dydx_pk),
+            "size": os.getenv("SIZE"),
+            "min_size": os.getenv("MIN_SIZE"),
+            "max_size": os.getenv("MAX_SIZE"),
+            "size_pct": os.getenv("SIZE_PCT"),
+            "dynamic_size": os.getenv("DYNAMIC_SIZE"),
+            "leverage": os.getenv("LEVERAGE"),
+            "max_positions": os.getenv("MAX_POSITIONS"),
         }
+
+        if self.app_ref:
+            diag["runtime_app_config"] = {
+                "size_usd": self.app_ref.size_usd,
+                "dynamic_size": self.app_ref.dynamic_size,
+                "size_pct": self.app_ref.size_pct,
+                "min_size_usd": self.app_ref.min_size_usd,
+                "max_size_usd": self.app_ref.max_size_usd,
+                "max_positions": self.app_ref.max_positions,
+                "leverage": self.app_ref.leverage,
+                "calculated_order_size": self.app_ref.calculate_order_size(),
+            }
 
         # 1. Prova de connexió amb Hyperliquid API
         if wallet_addr:
@@ -1453,15 +1503,73 @@ class WebDashboardServer:
         return web.json_response({"status": "err", "error": "trading_paused not available"})
 
     async def handle_set_leverage(self, request):
-        lev_str = request.query.get("leverage", "2")
+        lev_str = request.query.get("leverage", "3")
         try:
             lev = int(lev_str)
         except ValueError:
-            lev = 2
+            lev = 3
         if hasattr(self.exchange, "configure_all_leverage"):
             res = await self.exchange.configure_all_leverage(leverage=lev)
+            self.exchange.leverage = float(lev)
+            if self.app_ref:
+                self.app_ref.leverage = float(lev)
             return web.json_response(res)
         return web.json_response({"status": "err", "error": "configure_all_leverage not available"})
+
+    async def handle_set_size(self, request):
+        size_str = request.query.get("size")
+        dynamic_str = request.query.get("dynamic")
+        size_pct_str = request.query.get("size_pct")
+        min_size_str = request.query.get("min_size")
+        max_size_str = request.query.get("max_size")
+
+        if self.app_ref:
+            if size_str is not None:
+                try:
+                    sz = float(size_str)
+                    self.app_ref.size_usd = sz
+                    self.app_ref.min_size_usd = min(self.app_ref.min_size_usd, sz)
+                    self.app_ref.max_size_usd = max(self.app_ref.max_size_usd, sz * 2.0)
+                except ValueError:
+                    pass
+            if dynamic_str is not None:
+                self.app_ref.dynamic_size = dynamic_str.lower() in ("true", "1", "yes")
+            if size_pct_str is not None:
+                try:
+                    self.app_ref.size_pct = float(size_pct_str)
+                except ValueError:
+                    pass
+            if min_size_str is not None:
+                try:
+                    self.app_ref.min_size_usd = float(min_size_str)
+                except ValueError:
+                    pass
+            if max_size_str is not None:
+                try:
+                    self.app_ref.max_size_usd = float(max_size_str)
+                except ValueError:
+                    pass
+
+            return web.json_response({
+                "status": "ok",
+                "size_usd": self.app_ref.size_usd,
+                "dynamic_size": self.app_ref.dynamic_size,
+                "size_pct": self.app_ref.size_pct,
+                "min_size_usd": self.app_ref.min_size_usd,
+                "max_size_usd": self.app_ref.max_size_usd,
+                "calculated_order_size": self.app_ref.calculate_order_size(),
+            })
+        return web.json_response({"status": "err", "error": "app_ref not available"})
+
+    async def handle_set_max_positions(self, request):
+        max_pos_str = request.query.get("max_positions", "6")
+        try:
+            max_pos = int(max_pos_str)
+            if self.app_ref:
+                self.app_ref.max_positions = max_pos
+            return web.json_response({"status": "ok", "max_positions": max_pos})
+        except ValueError:
+            return web.json_response({"status": "err", "error": "Invalid max_positions value"})
 
     async def start(self):
         self.runner = web.AppRunner(self.app)
