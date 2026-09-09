@@ -195,7 +195,7 @@ class OkxLiveClient:
             return
 
         # 1. Carregar configuració del compte (posMode, acctLv) si tenim credencials
-        if self.is_ready_to_trade():
+        if not self.account_config and self.is_ready_to_trade():
             try:
                 cfg_res = await self._request("GET", "/api/v5/account/config")
                 if cfg_res.get("code") == "0" and cfg_res.get("data"):
@@ -513,30 +513,48 @@ class OkxLiveClient:
             logger.error(f"❌ Error petició ordre OKX (Code {code}): {msg}")
             return {"status": "err", "code": code, "error": msg}
 
-    async def market_close(self, coin: str, size: float) -> dict:
-        """Tanca immediatament una posició oberta a OKX mitjançant l'endpoint close-position."""
+    async def market_close(self, coin: str, size: Optional[float] = None) -> dict:
+        """Tanca immediatament una posició a OKX (sencera o parcialment per rebalanceig)."""
         await self.init_contract_specs()
         inst_id = self.get_inst_id(coin)
         pos_side = "net"
-        if self.pos_mode == "long_short_mode":
-            try:
-                positions = await self.get_positions()
-                for p in positions:
-                    if p.get("coin") == coin.upper():
-                        pos_side = "long" if p.get("side") == "buy" else "short"
-                        break
-            except Exception:
-                pass
-        payload = {
-            "instId": inst_id,
-            "mgnMode": "cross",
-            "posSide": pos_side,
-        }
-        logger.info(f"🚨 Tancant posició restant a OKX: {coin} ({inst_id}, posSide={pos_side})...")
-        res = await self._request("POST", "/api/v5/trade/close-position", data=payload)
-        if res.get("code") == "0":
-            return {"status": "ok", "data": res.get("data", [])}
-        return {"status": "err", "code": res.get("code"), "error": res.get("msg")}
+        positions = await self.get_positions()
+        pos = next((p for p in positions if p.get("coin") == coin.upper()), None)
+        if not pos:
+            return {"status": "ok", "msg": "No position to close"}
+
+        current_side = pos.get("side", "")
+        current_amount = float(pos.get("amount", 0.0))
+
+        # Si no s'especifica mida o és >= posició sencera, usem close-position d'OKX
+        if size is None or size >= current_amount * 0.99:
+            if self.pos_mode == "long_short_mode":
+                pos_side = "long" if current_side == "buy" else "short"
+            payload = {
+                "instId": inst_id,
+                "mgnMode": "cross",
+                "posSide": pos_side,
+            }
+            logger.info(f"🚨 Tancant posició sencera a OKX: {coin} ({inst_id}, posSide={pos_side})...")
+            res = await self._request("POST", "/api/v5/trade/close-position", data=payload)
+            if res.get("code") == "0":
+                return {"status": "ok", "data": res.get("data", [])}
+            return {"status": "err", "code": res.get("code"), "error": res.get("msg")}
+        else:
+            # Tancament parcial per Delta Rebalancer: ordre contrària agressiva IOC amb reduce_only=True
+            close_is_buy = (current_side == "sell")
+            last_price = float(pos.get("avg_entry_price", 0.0))
+            aggr_px = last_price * 1.05 if close_is_buy else last_price * 0.95
+            logger.info(f"⚖️ Tancant parcialment a OKX: {coin} {size} (de {current_amount}) amb IOC reduce_only...")
+            return await self.place_order(
+                coin=coin,
+                is_buy=close_is_buy,
+                size=size,
+                price=aggr_px,
+                post_only=False,
+                ioc=True,
+                reduce_only=True,
+            )
 
     async def cancel_all_orders(self, coin: Optional[str] = None) -> dict:
         """Cancel·la totes les ordres pendents per a un instrument o globalment."""

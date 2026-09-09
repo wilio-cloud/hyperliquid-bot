@@ -71,26 +71,25 @@ def test_okx_headers_live_vs_demo():
 
 def test_okx_contract_sizing():
     """Comprova la conversió de mida base a contractes i l'arrodoniment delta-neutral."""
-    client = OkxLiveClient("k", "s", "p")
+    # 1. Mode Global (SWAP)
+    client_global = OkxLiveClient("k", "s", "p", base_url="https://www.okx.com")
+    with patch.dict("os.environ", {"OKX_REGION": "global"}):
+        assert client_global.get_contract_val("BTC") == 0.01
+        assert client_global.to_contract_size("BTC", 0.024) == 2
+        assert client_global.round_size("BTC", 0.024) == 0.02
+        assert client_global.get_contract_val("ETH") == 0.1
+        assert client_global.to_contract_size("ETH", 0.38) == 4
+        assert client_global.round_size("ETH", 0.38) == 0.4
+        assert client_global.get_contract_val("SOL") == 1.0
 
-    # BTC ctVal = 0.01 BTC
-    assert client.get_contract_val("BTC") == 0.01
-    assert client.to_contract_size("BTC", 0.024) == 2
-    assert client.round_size("BTC", 0.024) == 0.02
-
-    # ETH ctVal = 0.1 ETH
-    assert client.get_contract_val("ETH") == 0.1
-    assert client.to_contract_size("ETH", 0.38) == 4
-    assert client.round_size("ETH", 0.38) == 0.4
-
-    # SOL ctVal = 1.0 SOL
-    assert client.get_contract_val("SOL") == 1.0
-    assert client.to_contract_size("SOL", 3.4) == 3
-    assert client.round_size("SOL", 3.4) == 3.0
-
-    # Mida mínima sempre és com a mínim 1 contracte
-    assert client.to_contract_size("BTC", 0.0001) == 1
-    assert client.round_size("BTC", 0.0001) == 0.01
+    # 2. Mode Europa / EEA (X-Perp per a minoristes)
+    client_eea = OkxLiveClient("k", "s", "p", base_url="https://eea.okx.com")
+    with patch.dict("os.environ", {"OKX_REGION": "eea"}):
+        assert client_eea.get_contract_val("BTC") == 0.0001
+        assert client_eea.get_contract_val("ETH") == 0.001
+        assert client_eea.get_contract_val("SOL") == 0.01
+        assert client_eea.to_contract_size("BTC", 0.000375) == 4
+        assert client_eea.round_size("BTC", 0.000375) == 0.0004
 
 
 def test_okx_price_rounding():
@@ -108,15 +107,14 @@ def test_okx_price_rounding():
 def test_okx_get_balance_and_positions():
     """Verifica la consulta de saldo i mapeig de posicions obertes a OKX."""
     async def _test():
-        client = OkxLiveClient("k", "s", "p")
-
+        client = OkxLiveClient("k", "s", "p", base_url="https://www.okx.com")
         mock_bal_res = {
             "code": "0",
             "data": [{
+                "totalEq": "450.50",
                 "details": [{
                     "ccy": "USDT",
                     "availBal": "450.50",
-                    "eq": "500.25",
                 }]
             }]
         }
@@ -132,18 +130,22 @@ def test_okx_get_balance_and_positions():
             }]
         }
 
-        with patch.object(client, "_request", side_effect=[mock_bal_res, mock_pos_res]):
-            bal = await client.get_balance()
-            assert bal == 450.50
+        client.account_config = {"posMode": "net_mode"}
+        client._specs_initialized = True
 
-            positions = await client.get_positions()
-            assert len(positions) == 1
-            pos = positions[0]
-            assert pos["asset"] == "SOL"
-            assert pos["side"] == "buy"
-            assert pos["contracts"] == 2.0
-            assert pos["amount"] == 2.0  # 2 contracts * 1.0 ctVal
-            assert pos["avg_entry_price"] == 140.50
+        with patch.dict("os.environ", {"OKX_REGION": "global"}):
+            with patch.object(client, "_request", side_effect=[mock_bal_res, mock_pos_res]):
+                bal = await client.get_balance()
+                assert bal == 450.50
+
+                positions = await client.get_positions()
+                assert len(positions) == 1
+                pos = positions[0]
+                assert pos["asset"] == "SOL"
+                assert pos["side"] == "buy"
+                assert pos["contracts"] == 2.0
+                assert pos["amount"] == 2.0  # 2 contracts * 1.0 ctVal
+                assert pos["avg_entry_price"] == 140.50
 
     asyncio.run(_test())
 
@@ -151,8 +153,9 @@ def test_okx_get_balance_and_positions():
 def test_okx_place_order_and_market_close():
     """Verifica l'enviament d'ordres límit/IOC i tancament a mercat a OKX."""
     async def _test():
-        client = OkxLiveClient("k", "s", "p")
+        client = OkxLiveClient("k", "s", "p", base_url="https://www.okx.com")
         client._specs_initialized = True  # bypass instruments fetch
+        client.account_config = {"posMode": "net_mode"}
 
         mock_order_res = {
             "code": "0",
@@ -162,24 +165,43 @@ def test_okx_place_order_and_market_close():
                 "sMsg": "",
             }]
         }
+        mock_check_res = {
+            "code": "0",
+            "data": [{
+                "ordId": "123456789",
+                "state": "filled",
+                "accFillSz": "2",
+                "avgPx": "145.0",
+            }]
+        }
 
-        with patch.object(client, "_request", return_value=mock_order_res) as mock_req:
-            res = await client.place_order(
-                coin="SOL",
-                is_buy=True,
-                size=2.0,
-                price=145.0,
-                ioc=True,
-            )
-            assert res["status"] == "ok"
-            assert res["ordId"] == "123456789"
-            assert mock_req.call_count == 1
-            call_kwargs = mock_req.call_args[1]
-            assert call_kwargs["data"]["ordType"] == "ioc"
-            assert call_kwargs["data"]["sz"] == "2"
+        with patch.dict("os.environ", {"OKX_REGION": "global"}):
+            with patch.object(client, "_request", side_effect=[mock_order_res, mock_check_res]) as mock_req:
+                res = await client.place_order(
+                    coin="SOL",
+                    is_buy=True,
+                    size=2.0,
+                    price=145.0,
+                    ioc=True,
+                )
+                assert res["status"] == "ok"
+                assert res["ordId"] == "123456789"
+                assert mock_req.call_count == 2
+                call_kwargs = mock_req.call_args_list[0][1]
+                assert call_kwargs["data"]["ordType"] == "ioc"
+                assert call_kwargs["data"]["sz"] == "2"
 
+        mock_pos_res = {
+            "code": "0",
+            "data": [{
+                "instId": "SOL-USDT-SWAP",
+                "pos": "2",
+                "posSide": "net",
+                "avgPx": "145.0",
+            }]
+        }
         mock_close_res = {"code": "0", "data": [{"instId": "SOL-USDT-SWAP"}]}
-        with patch.object(client, "_request", return_value=mock_close_res) as mock_req:
+        with patch.object(client, "_request", side_effect=[mock_pos_res, mock_close_res]) as mock_req:
             res = await client.market_close("SOL", 2.0)
             assert res["status"] == "ok"
 
@@ -414,7 +436,7 @@ def test_okx_xperp_discovery_and_order():
             ],
         }
         mock_swap_res = {"code": "0", "data": []}
-
+        client.account_config = {"posMode": "net_mode"}
         with patch.object(client, "_request", side_effect=[mock_fut_res, mock_swap_res]):
             await client.init_contract_specs()
 

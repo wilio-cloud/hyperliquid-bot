@@ -112,30 +112,94 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             # Reconciliem cada moneda que tingui posicions obertes als brokers
             existing_active_coins = {p.coin.upper(): pair_id for pair_id, p in self.active_positions.items()}
 
-            for coin in self._open_broker_coins:
-                if coin not in existing_active_coins:
-                    hl_pos = hl_positions_map.get(coin)
-                    aevo_pos = aevo_positions_map.get(coin)
-                    if hl_pos and aevo_pos:
-                        szi = float(hl_pos.get("szi", 0.0))
-                        hl_entry_px = float(hl_pos.get("entryPx", 0.0))
-                        aevo_amount = float(aevo_pos.get("amount", 0.0))
-                        aevo_side = aevo_pos.get("side", "").lower()
-                        aevo_entry_px = float(aevo_pos.get("avg_entry_price", 0.0))
+            for coin in list(self._open_broker_coins):
+                hl_pos = hl_positions_map.get(coin)
+                aevo_pos = aevo_positions_map.get(coin)
 
-                        if szi < 0 and aevo_side == "buy":
-                            direction = ArbitrageDirection.SELL_HL_BUY_BN
-                            hl_side = OrderSide.SELL
-                            bn_side = OrderSide.BUY
-                        else:
-                            direction = ArbitrageDirection.BUY_HL_SELL_BN
-                            hl_side = OrderSide.BUY
-                            bn_side = OrderSide.SELL
+                # CAS 1: Pota òrfena a Hyperliquid sense cobertura a Venue2 (Anti-Unhedged Guard)
+                if hl_pos and not aevo_pos:
+                    szi = float(hl_pos.get("szi", 0.0))
+                    logger.warning(
+                        f"🚨 [ORPHAN GUARD] Detectada posició òrfena a Hyperliquid per a {coin} "
+                        f"(szi={szi}) sense cobertura a {self.venue2_name}. Tancant a mercat per protegir capital..."
+                    )
+                    try:
+                        await self.hl_client.market_close(coin=coin, size=abs(szi))
+                    except Exception as ohe:
+                        logger.error(f"Error tancant posició òrfena Hyperliquid {coin}: {ohe}")
+                    if coin in existing_active_coins:
+                        self.active_positions.pop(existing_active_coins[coin], None)
 
-                        hl_sz = abs(szi)
-                        bn_sz = abs(aevo_amount)
+                # CAS 2: Pota òrfena a Venue2 sense cobertura a Hyperliquid
+                elif aevo_pos and not hl_pos:
+                    amt = float(aevo_pos.get("amount", 0.0))
+                    logger.warning(
+                        f"🚨 [ORPHAN GUARD] Detectada posició òrfena a {self.venue2_name} per a {coin} "
+                        f"(amt={amt}) sense cobertura a Hyperliquid. Tancant a mercat per protegir capital..."
+                    )
+                    try:
+                        await self.venue2_client.market_close(coin=coin, size=amt)
+                    except Exception as ove:
+                        logger.error(f"Error tancant posició òrfena {self.venue2_name} {coin}: {ove}")
+                    if coin in existing_active_coins:
+                        self.active_positions.pop(existing_active_coins[coin], None)
+
+                # CAS 3: Posicions a ambdós brokers -> Verificar Delta Neutrality i Rebalancejar
+                elif hl_pos and aevo_pos:
+                    szi = float(hl_pos.get("szi", 0.0))
+                    hl_entry_px = float(hl_pos.get("entryPx", 0.0))
+                    aevo_amount = float(aevo_pos.get("amount", 0.0))
+                    aevo_side = aevo_pos.get("side", "").lower()
+                    aevo_entry_px = float(aevo_pos.get("avg_entry_price", 0.0))
+
+                    hl_sz = abs(szi)
+                    bn_sz = abs(aevo_amount)
+                    diff = hl_sz - bn_sz
+
+                    # Comprovar desequilibri de mida (ex: NEAR 24 a HL vs 12 a OKX)
+                    if abs(diff) > 0.001:
+                        logger.warning(
+                            f"⚖️ [DELTA REBALANCER] Desequilibri detectat per a {coin}: "
+                            f"HL={hl_sz}, {self.venue2_name}={bn_sz} (Diferència: {diff:+.4f})"
+                        )
+                        if diff > 0.001:
+                            excess_hl = diff
+                            logger.info(f"⚖️ Tancant excés de {excess_hl:.4f} {coin} a Hyperliquid...")
+                            try:
+                                await self.hl_client.market_close(coin=coin, size=excess_hl)
+                                hl_sz = bn_sz
+                            except Exception as re_e:
+                                logger.error(f"Error rebalancejant excés Hyperliquid {coin}: {re_e}")
+                        elif diff < -0.001:
+                            excess_bn = abs(diff)
+                            logger.info(f"⚖️ Tancant excés de {excess_bn:.4f} {coin} a {self.venue2_name}...")
+                            try:
+                                await self.venue2_client.market_close(coin=coin, size=excess_bn)
+                                bn_sz = hl_sz
+                            except Exception as re_e:
+                                logger.error(f"Error rebalancejant excés {self.venue2_name} {coin}: {re_e}")
+
+                    matched_sz = min(hl_sz, bn_sz)
+
+                    if szi < 0 and aevo_side == "buy":
+                        direction = ArbitrageDirection.SELL_HL_BUY_BN
+                        hl_side = OrderSide.SELL
+                        bn_side = OrderSide.BUY
+                    else:
+                        direction = ArbitrageDirection.BUY_HL_SELL_BN
+                        hl_side = OrderSide.BUY
+                        bn_side = OrderSide.SELL
+
+                    # Actualitzar o crear ArbitragePosition local
+                    if coin in existing_active_coins:
+                        pair_id = existing_active_coins[coin]
+                        pos_obj = self.active_positions[pair_id]
+                        pos_obj.leg_hl.size = matched_sz
+                        pos_obj.leg_bn.size = matched_sz
+                        pos_obj.leg_hl.size_usd = matched_sz * pos_obj.leg_hl.entry_price
+                        pos_obj.leg_bn.size_usd = matched_sz * pos_obj.leg_bn.entry_price
+                    else:
                         pair_id = f"arb_{coin}_reconciled_{int(time.time())}"
-
                         mid = (hl_entry_px + aevo_entry_px) / 2.0 if (hl_entry_px + aevo_entry_px) > 0 else 1.0
                         entry_spread = abs(hl_entry_px - aevo_entry_px) / mid * 100.0
 
@@ -144,22 +208,22 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                             coin=coin,
                             side=hl_side,
                             entry_price=hl_entry_px,
-                            size=hl_sz,
-                            size_usd=hl_sz * hl_entry_px,
+                            size=matched_sz,
+                            size_usd=matched_sz * hl_entry_px,
                             current_price=hl_entry_px,
                             fee_rate=self.hl_taker_fee,
-                            fees_paid=hl_sz * hl_entry_px * self.hl_taker_fee,
+                            fees_paid=matched_sz * hl_entry_px * self.hl_taker_fee,
                         )
                         leg_bn = ArbitrageLeg(
                             venue=self.venue2_name,
                             coin=coin,
                             side=bn_side,
                             entry_price=aevo_entry_px,
-                            size=bn_sz,
-                            size_usd=bn_sz * aevo_entry_px,
+                            size=matched_sz,
+                            size_usd=matched_sz * aevo_entry_px,
                             current_price=aevo_entry_px,
                             fee_rate=self.bn_taker_fee,
-                            fees_paid=bn_sz * aevo_entry_px * self.bn_taker_fee,
+                            fees_paid=matched_sz * aevo_entry_px * self.bn_taker_fee,
                         )
                         pos_obj = ArbitragePosition(
                             pair_id=pair_id,
@@ -171,29 +235,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                             entry_time=time.time(),
                         )
                         self.active_positions[pair_id] = pos_obj
-                        logger.info(f"✅ Reconciliada posició activa existent per a {coin} a active_positions ({pair_id})")
-                    elif hl_pos and not aevo_pos:
-                        # Pota òrfena a Hyperliquid sense cobertura a Venue2 (Anti-Unhedged Guard)
-                        szi = float(hl_pos.get("szi", 0.0))
-                        logger.warning(
-                            f"🚨 [ORPHAN GUARD] Detectada posició òrfena a Hyperliquid per a {coin} "
-                            f"(szi={szi}) sense cobertura a {self.venue2_name}. Tancant a mercat per protegir capital..."
-                        )
-                        try:
-                            await self.hl_client.market_close(coin=coin, size=abs(szi))
-                        except Exception as ohe:
-                            logger.error(f"Error tancant posició òrfena Hyperliquid {coin}: {ohe}")
-                    elif aevo_pos and not hl_pos:
-                        # Pota òrfena a Venue2 sense cobertura a Hyperliquid
-                        amt = float(aevo_pos.get("amount", 0.0))
-                        logger.warning(
-                            f"🚨 [ORPHAN GUARD] Detectada posició òrfena a {self.venue2_name} per a {coin} "
-                            f"(amt={amt}) sense cobertura a Hyperliquid. Tancant a mercat per protegir capital..."
-                        )
-                        try:
-                            await self.venue2_client.market_close(coin=coin, size=amt)
-                        except Exception as ove:
-                            logger.error(f"Error tancant posició òrfena {self.venue2_name} {coin}: {ove}")
+                        logger.info(f"✅ Reconciliada posició activa existent per a {coin} ({pair_id}) amb mida 1:1 {matched_sz}")
 
             # Si una posició local ja està tancada als brokers, l'eliminem
             for coin, pair_id in list(existing_active_coins.items()):
@@ -458,6 +500,20 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                         except Exception as ce:
                             logger.debug(f"Neteja d'ordres pendents per {coin}: {ce}")
 
+                        # Comprovació de cursa: si s'ha omplert just abans de la cancel·lació
+                        try:
+                            st = await self.hl_client.get_account_state()
+                            for p in st.get("assetPositions", []):
+                                pos = p.get("position", {})
+                                p_coin = pos.get("coin", "").upper()
+                                if (p_coin == coin or (coin == "PEPE" and p_coin == "KPEPE")) and abs(float(pos.get("szi", 0.0))) > 0:
+                                    hl_ok = True
+                                    hl_fill_type = "MAKER"
+                                    logger.info(f"🎯 Ordre Maker {coin} omplerta just a la cursa de cancel·lació! Procedint amb cobertura.")
+                                    break
+                        except Exception as se:
+                            logger.debug(f"Error verificant estat post-cancel·lació per {coin}: {se}")
+
             # Si Hyperliquid no s'omple o falla, avortem immediatament sense tocar Aevo (0 risc, 0 exposició)
             if not hl_ok:
                 logger.warning(
@@ -558,6 +614,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 )
                 await self.hl_client.market_close(coin=coin, size=hl_sz)
                 logger.info(f"🛡️ Rollback Hyperliquid completat per {coin}. Compte pla i protegit.")
+                await self.reconcile_active_positions()
 
         except Exception as e:
             logger.error(f"Error crític en _execute_live_open per {coin}: {e}")
