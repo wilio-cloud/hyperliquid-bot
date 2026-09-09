@@ -423,6 +423,7 @@ class ArbitragePaperExchange:
                 if p_dict.get("exit_time") and p_dict.get("entry_time") and (p_dict["exit_time"] - p_dict["entry_time"] > 86400):
                     p_dict["entry_time"] = p_dict["exit_time"] - 180.0
                 pos = ArbitragePosition(**p_dict)
+                pos.update_pnl()
                 self.closed_positions.append(pos)
 
             logger.info(

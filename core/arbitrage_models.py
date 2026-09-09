@@ -97,6 +97,7 @@ class ArbitragePosition(BaseModel):
                 self.leg_hl.realized_pnl + self.leg_bn.realized_pnl
                 + self.accumulated_funding
             )
+            self.unrealized_pnl = 0.0
 
 class CrossSpreadInfo(BaseModel):
     coin: str

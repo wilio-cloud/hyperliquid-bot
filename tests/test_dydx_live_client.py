@@ -337,3 +337,69 @@ def test_adaptive_max_book_spread_for_dydx():
     finally:
         del os.environ["MAX_BOOK_SPREAD"]
 
+
+def test_arbitrage_live_exchange_close_deducts_all_fees_accurately():
+    hl_mock = MagicMock(spec=HyperliquidLiveClient)
+    hl_mock.round_size.side_effect = lambda c, s: round(s, 2)
+    hl_mock.place_order = AsyncMock(return_value={"status": "ok", "fill": {"avgPx": "100.20"}})
+    hl_mock.market_close = AsyncMock(return_value={"status": "ok", "filled": {"avgPx": "100.10"}})
+
+    dydx_mock = MagicMock(spec=DydxLiveClient)
+    dydx_mock.round_size.side_effect = lambda c, s: round(s, 2)
+    dydx_mock.place_order = AsyncMock(return_value={"status": "ok", "data": {"price": 100.00}})
+    dydx_mock.market_close = AsyncMock(return_value={"status": "ok", "data": {"price": 100.10}})
+
+    exchange = ArbitrageLiveExchange(
+        hl_client=hl_mock,
+        venue2_client=dydx_mock,
+        venue2_name="DYDX",
+        initial_hl_balance=500.0,
+        initial_bn_balance=500.0,
+        leverage=2.0,
+        state_file="/tmp/test_live_state_close_fees.json",
+    )
+    exchange.active_positions.clear()
+    exchange.closed_positions.clear()
+
+    sig = ArbitrageSignal(
+        coin="SOL",
+        direction=ArbitrageDirection.SELL_HL_BUY_BN,
+        spread_pct=0.20,
+        hl_price=100.20,
+        bn_price=100.00,
+        timestamp=1000.0,
+    )
+
+    # 1. Obrir posició de 100$ en mode MAKER-FIRST
+    # HL Maker fee: 100$ * 0.00015 = 0.015$
+    # dYdX Maker fee: 100$ * 0.00010 = 0.010$
+    # Total comissions d'entrada: 0.025$
+    asyncio.run(exchange._execute_live_open(sig, size_usd=100.0, is_maker=True))
+    assert len(exchange.active_positions) == 1
+    pos = list(exchange.active_positions.values())[0]
+    assert pos.total_fees == pytest.approx(0.025, abs=1e-4)
+
+    # 2. Tancar posició quan convergeixen a 100.10$
+    # HL venuda a 100.20$, recomprada a 100.10$ -> Guany brut HL = +0.10$
+    # dYdX comprada a 100.00$, revenuda a 100.10$ -> Guany brut dYdX = +0.10$
+    # Guany brut total = +0.20$
+    # HL exit fee (Taker 0.045%): ~100$ * 0.00045 = 0.045$
+    # dYdX exit fee (Taker 0.050%): ~100$ * 0.00050 = 0.050$
+    # Comissions de sortida totals: ~0.095$
+    # Comissions totals cicle complet: 0.025$ + 0.095$ = 0.120$
+    # PnL net realitzat ha de ser: 0.20$ - 0.120$ = +0.080$
+    hl_mock.place_order.return_value = {"status": "ok", "filled": {"avgPx": "100.10"}}
+    dydx_mock.place_order.return_value = {"status": "ok", "data": {"price": 100.10}}
+
+    asyncio.run(exchange._execute_live_close(pos, hl_exit_price=100.10, bn_exit_price=100.10, reason="CONVERGENCE_TARGET", is_maker=False))
+
+    assert len(exchange.active_positions) == 0
+    assert len(exchange.closed_positions) == 1
+    closed = exchange.closed_positions[0]
+
+    # Comprovem que total_fees reflecteix TOTES les comissions (entrada + sortida)
+    assert closed.total_fees == pytest.approx(0.120, abs=1e-3)
+    # Comprovem que realized_pnl dedueix TOTS els costos (entrada i sortida)
+    assert closed.realized_pnl == pytest.approx(0.080, abs=1e-3)
+
+

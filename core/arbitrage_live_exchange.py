@@ -635,7 +635,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             actual_bn_exit_px = bn_exit_price
             if isinstance(aevo_res, dict) and "data" in aevo_res:
                 try:
-                    actual_bn_exit_px = float(aevo_res["data"].get("avg_price", bn_exit_price))
+                    actual_bn_exit_px = float(aevo_res["data"].get("avg_price", aevo_res["data"].get("price", bn_exit_price)))
                 except Exception:
                     pass
 
@@ -646,31 +646,23 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             pos.leg_hl.close(actual_hl_exit_px, exit_fee_rate=hl_fee_rate)
             pos.leg_bn.close(actual_bn_exit_px, exit_fee_rate=bn_fee_rate)
 
-            # Càlcul de PnL amb preus i comissions 100% reals
-            if pos.leg_hl.side == OrderSide.BUY:
-                hl_gross = (actual_hl_exit_px - pos.leg_hl.entry_price) * pos.leg_hl.size
-            else:
-                hl_gross = (pos.leg_hl.entry_price - actual_hl_exit_px) * pos.leg_hl.size
+            # Càlcul de comissions de sortida per al total de l'exchange
             hl_exit_fee = pos.leg_hl.size * actual_hl_exit_px * hl_fee_rate
-
-            if pos.leg_bn.side == OrderSide.BUY:
-                bn_gross = (actual_bn_exit_px - pos.leg_bn.entry_price) * pos.leg_bn.size
-            else:
-                bn_gross = (pos.leg_bn.entry_price - actual_bn_exit_px) * pos.leg_bn.size
             bn_exit_fee = pos.leg_bn.size * actual_bn_exit_px * bn_fee_rate
-
             self.total_fees_paid += (hl_exit_fee + bn_exit_fee)
+
             pos.is_closed = True
             pos.exit_time = time.time()
             pos.exit_reason = reason
-            pos.realized_pnl = (hl_gross - hl_exit_fee) + (bn_gross - bn_exit_fee) + pos.accumulated_funding
+            pos.update_pnl()
 
             if pair_id in self.active_positions:
                 del self.active_positions[pair_id]
             self.closed_positions.append(pos)
 
             logger.info(
-                f"🎉 [ARB REAL TANCAT] {coin} {reason} | PnL Net Realitzat: {pos.realized_pnl:+.3f}$"
+                f"🎉 [ARB REAL TANCAT] {coin} {reason} | PnL Net Realitzat: {pos.realized_pnl:+.3f}$ "
+                f"(Funding: {pos.accumulated_funding:+.4f}$, Fees Totals: {pos.total_fees:.4f}$)"
             )
             self.record_equity_point(f"CLOSE_{reason}")
             self.save_state()
