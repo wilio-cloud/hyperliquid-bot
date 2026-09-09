@@ -813,6 +813,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         const bnPx = (p.leg_bn && p.leg_bn.entry_price) ? p.leg_bn.entry_price.toFixed(2) : '-';
                         const bnSz = (p.leg_bn && p.leg_bn.size_usd) ? p.leg_bn.size_usd.toFixed(0) : '-';
 
+                        const carryBadge = (p.strategy_type === 'FUNDING_CARRY') ? ' <span style="font-size: 0.65rem; background: #8b5cf6; color: #fff; padding: 2px 5px; border-radius: 4px; vertical-align: middle;">CARRY</span>' : '';
                         const exitDiag = p.exit_diagnostic || 'Monitoritzant';
                         return `<tr>
                             <td style="font-weight: bold; color: #facc15;">${p.coin}${carryBadge}</td>
