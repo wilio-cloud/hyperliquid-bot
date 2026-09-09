@@ -285,12 +285,16 @@ class OkxLiveClient:
         return round(contracts * ct_val, 6)
 
     def round_price(self, coin: str, price: float) -> float:
-        """Arrodoneix el preu segons el tickSz de l'instrument d'OKX."""
+        """Arrodoneix el preu segons el tickSz de l'instrument d'OKX evitant problemes de notació científica."""
         c = coin.upper()
         tick_sz = 0.01
         if c in self.contract_specs:
             tick_sz = self.contract_specs[c].get("tickSz", 0.01)
-        decimals = len(str(tick_sz).split(".")[1]) if "." in str(tick_sz) else 2
+        try:
+            d_str = f"{float(tick_sz):.8f}".rstrip("0")
+            decimals = len(d_str.split(".")[1]) if "." in d_str else 2
+        except Exception:
+            decimals = 4
         return round(price, decimals)
 
     async def get_balance(self) -> float:
@@ -468,13 +472,34 @@ class OkxLiveClient:
             s_msg = order_data.get("sMsg", "")
             if s_code == "0":
                 logger.info(f"✅ Ordre OKX acceptada! OrdId: {ord_id}")
+                fill_sz = contracts * ct_val
+                avg_px = rounded_px
+
+                if ioc:
+                    await asyncio.sleep(0.12)
+                    try:
+                        chk = await self._request("GET", "/api/v5/trade/order", params={"instId": inst_id, "ordId": ord_id})
+                        if chk.get("code") == "0" and chk.get("data"):
+                            ord_info = chk["data"][0]
+                            acc_fill = float(ord_info.get("accFillSz", 0.0))
+                            ord_state = ord_info.get("state", "")
+                            if acc_fill <= 0 and ord_state == "canceled":
+                                logger.warning(f"❌ Ordre IOC OKX no s'ha omplert al preu {rounded_px} (state={ord_state}, accFillSz=0).")
+                                return {"status": "err", "error": "ioc_unfilled", "ordId": ord_id}
+                            if acc_fill > 0:
+                                fill_sz = acc_fill * ct_val
+                                avg_px = float(ord_info.get("avgPx", rounded_px))
+                                logger.info(f"🎯 Ordre IOC OKX omplerta amb èxit! {acc_fill} cts @ {avg_px}")
+                    except Exception as ie:
+                        logger.debug(f"Error verificant estat IOC OKX: {ie}")
+
                 return {
                     "status": "ok",
                     "ordId": ord_id,
                     "data": {
-                        "price": rounded_px,
-                        "avg_price": rounded_px,
-                        "size": contracts * ct_val,
+                        "price": avg_px,
+                        "avg_price": avg_px,
+                        "size": fill_sz,
                         "ordId": ord_id,
                         "instId": inst_id,
                     },

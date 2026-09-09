@@ -473,7 +473,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 base_hedge_px = latest_bn.best_ask if aevo_is_buy else latest_bn.best_bid
             else:
                 base_hedge_px = signal.bn_price
-            hedge_px = base_hedge_px * 1.002 if aevo_is_buy else base_hedge_px * 0.998
+            hedge_px = base_hedge_px * 1.003 if aevo_is_buy else base_hedge_px * 0.997
 
             try:
                 extra_kwargs = {}
