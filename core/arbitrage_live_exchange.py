@@ -229,14 +229,21 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                             fee_rate=self.bn_taker_fee,
                             fees_paid=matched_sz * aevo_entry_px * self.bn_taker_fee,
                         )
+                        raw_pos = aevo_pos.get("raw", {}) if isinstance(aevo_pos, dict) else {}
+                        pos_c_time = raw_pos.get("cTime") or aevo_pos.get("cTime")
+                        try:
+                            parsed_entry_time = float(pos_c_time) / 1000.0 if pos_c_time else time.time()
+                        except Exception:
+                            parsed_entry_time = time.time()
+
                         pos_obj = ArbitragePosition(
                             pair_id=pair_id,
                             coin=coin,
                             direction=direction,
                             leg_hl=leg_hl,
                             leg_bn=leg_bn,
-                            entry_spread_pct=entry_spread,
-                            entry_time=time.time(),
+                            entry_spread_pct=max(entry_spread, 0.180),
+                            entry_time=parsed_entry_time,
                         )
                         self.active_positions[pair_id] = pos_obj
                         logger.info(f"✅ Reconciliada posició activa existent per a {coin} ({pair_id}) amb mida 1:1 {matched_sz}")

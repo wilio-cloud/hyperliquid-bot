@@ -97,7 +97,9 @@ class CrossExchangeArbitrageStrategy:
     def effective_min_spread(self) -> float:
         """Retorna el llindar base general tenint en compte Maker-First i el règim de cap de setmana."""
         if self.maker_first:
-            return 0.110
+            if "VERTEX" in self.venue2_name:
+                return 0.110
+            return max(self.min_entry_spread_pct * 0.75, 0.180)
         if self.auto_weekend_adjust and self.is_weekend_regime:
             return self.weekend_min_spread_pct
         return self.min_entry_spread_pct
@@ -105,12 +107,14 @@ class CrossExchangeArbitrageStrategy:
     def get_effective_min_spread(self, coin: Optional[str] = None) -> float:
         """
         Retorna el llindar efectiu específic per a cada actiu.
-        En mode Maker-First, les comissions round-trip es redueixen substancialment,
-        permetent capturar oportunitats a partir de 0.090% - 0.110%.
+        En mode Maker-First, cal un spread mínim suficient per cobrir comissions round-trip i tancar ràpid.
         """
         base = self.effective_min_spread
         if self.maker_first:
-            base = min(base, 0.110)
+            if "VERTEX" in self.venue2_name:
+                base = min(base, 0.110)
+            else:
+                base = max(base, 0.180)
 
         if not coin:
             return base
@@ -119,7 +123,10 @@ class CrossExchangeArbitrageStrategy:
         if c_upper in self.per_coin_min_spread:
             custom_spread = self.per_coin_min_spread[c_upper]
             if self.maker_first:
-                custom_spread = min(custom_spread * 0.45, 0.110)
+                if "VERTEX" in self.venue2_name:
+                    custom_spread = min(custom_spread * 0.45, 0.110)
+                else:
+                    custom_spread = max(custom_spread * 0.75, 0.180)
             elif self.auto_weekend_adjust and self.is_weekend_regime:
                 custom_spread = min(custom_spread, self.weekend_min_spread_pct)
             return custom_spread
@@ -389,33 +396,26 @@ class CrossExchangeArbitrageStrategy:
             else:
                 pos.divergence_start_time = None
 
-        # 4. Gestió per temps (Time-based Profit Guard):
-        # Protecció delta-neutral: afavorim tancaments en positiu, però evitem el bloqueig indefinit de capital
-        # si un exchange té llibres oberts o una operació no convergeix al cap d'1 hora.
+        # 4. Gestió dinàmica per temps (Slot Recycling) idèntica al Paper Trading per mantenir el ritme
         pos_age = time.time() - pos.entry_time
-        time_quick_tp = max(0.020, order_size_usd * 0.0006)
-        time_breakeven_tp = max(0.012, order_size_usd * 0.0004)
-        time_slot_free_tp = max(0.005, order_size_usd * 0.0002)
+        time_quick_tp = max(0.015, order_size_usd * 0.0005)
+        time_breakeven_tp = max(0.008, order_size_usd * 0.0003)
 
-        # A) Si porta > 15 minuts (900s) i el PnL net és >= quick_tp, tanca ràpid per alliberar la ranura
-        if pos_age >= 900.0 and projected_net_pnl >= time_quick_tp:
+        # A) Si porta > 5 minuts (300s) i el PnL net és >= quick_tp, tanca ràpid per alliberar la ranura
+        if pos_age >= 300.0 and projected_net_pnl >= time_quick_tp:
             return ("TIME_QUICK_PROFIT", hl_exit_px, bn_exit_px)
 
-        # B) Si porta > 30 minuts (1800s) i el PnL net és >= breakeven_tp, tanca amb guany net
-        if pos_age >= 1800.0 and projected_net_pnl >= time_breakeven_tp:
+        # B) Si porta > 8 minuts (480s) i el PnL net és positiu o breakeven, tanca amb guany
+        if pos_age >= 480.0 and projected_net_pnl >= time_breakeven_tp:
             return ("TIME_BREAKEVEN", hl_exit_px, bn_exit_px)
 
-        # C) Si porta > 45 minuts (2700s) i el PnL net cobreix comissions reals, allibera ranura
-        if pos_age >= 2700.0 and projected_net_pnl >= time_slot_free_tp:
-            return ("TIME_SLOT_FREE", hl_exit_px, bn_exit_px)
+        # C) Si porta > 15 minuts (900s) i el spread ha convergit (< 0.070%) o està a breakeven, allibera la ranura
+        if pos_age >= 900.0 and (current_spread_to_close <= 0.070 or projected_net_pnl >= -0.050):
+            return ("TIMEOUT_RECYCLE", hl_exit_px, bn_exit_px)
 
-        # D) Rotació de capital (> 60 minuts / 3600s): Si està a breakeven (pèrdua allowable de només 0.01$), allibera ranura
-        if pos_age >= 3600.0 and projected_net_pnl >= -0.010:
-            return ("TIME_ROTATION_BREAKEVEN", hl_exit_px, bn_exit_px)
-
-        # E) Timeout màxim de desbloqueig (> 2 hores / 7200s): Alliberar ranura si el cost d'espera supera la rotació (pèrdua projectada <= 0.03$)
-        if pos_age >= 7200.0 and projected_net_pnl >= -0.030:
-            return ("TIME_MAX_RELEASE", hl_exit_px, bn_exit_px)
+        # D) Timeout màxim de desbloqueig (> 25 minuts / 1500s): Alliberar ranura per mantenir la rotació contínua
+        if pos_age >= 1500.0 and projected_net_pnl >= -0.080:
+            return ("TIMEOUT_RECYCLE", hl_exit_px, bn_exit_px)
 
         return None
 

@@ -197,13 +197,17 @@ def test_cross_arbitrage_maker_first_spread_calibration():
     from strategies.cross_arbitrage import CrossExchangeArbitrageStrategy
 
     strat_taker = CrossExchangeArbitrageStrategy(maker_first=False)
-    strat_maker = CrossExchangeArbitrageStrategy(maker_first=True)
+    strat_maker_vertex = CrossExchangeArbitrageStrategy(maker_first=True, venue2_name="VERTEX")
 
     spread_taker = strat_taker.get_effective_min_spread("ETH")
-    spread_maker = strat_maker.get_effective_min_spread("ETH")
+    spread_vertex = strat_maker_vertex.get_effective_min_spread("ETH")
 
-    assert spread_maker < spread_taker
-    assert spread_maker <= 0.110, "En mode Maker-First el spread mínim ha de ser <= 0.110%"
+    assert spread_vertex < spread_taker
+    assert spread_vertex <= 0.110, "En mode Maker-First a Vertex el spread mínim ha de ser <= 0.110%"
+
+    strat_maker_okx = CrossExchangeArbitrageStrategy(maker_first=True, venue2_name="OKX")
+    spread_okx = strat_maker_okx.get_effective_min_spread("ETH")
+    assert spread_okx >= 0.180, "En mode Maker-First a OKX el spread mínim ha de ser >= 0.180% per cobrir comissions"
 
 if __name__ == "__main__":
     test_paper_exchange_post_only_rejection()
