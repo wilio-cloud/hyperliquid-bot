@@ -1241,23 +1241,20 @@ class WebDashboardServer:
                             cfg_res = await client._request("GET", "/api/v5/account/config")
                             acct_cfg = cfg_res.get("data", [{}])[0] if cfg_res.get("code") == "0" else {}
                             
-                            # Test exhaustiu de mercats i tipus d'ordre a OKX per diagnosticar 50124
-                            probe_tests = {}
-                            for test_name, payload in [
-                                ("spot_btc_usdc", {"instId": "BTC-USDC", "tdMode": "cash", "side": "buy", "ordType": "post_only", "sz": "0.0001", "px": "1000"}),
-                                ("swap_inj_usdt", {"instId": "INJ-USDT-SWAP", "tdMode": "cross", "side": "buy", "ordType": "post_only", "sz": "1", "px": "0.1", "posSide": "net"}),
-                                ("swap_inj_usdc_ccy", {"instId": "INJ-USDT-SWAP", "tdMode": "cross", "side": "buy", "ordType": "post_only", "sz": "1", "px": "0.1", "posSide": "net", "ccy": "USDC"}),
-                                ("swap_btc_usdc", {"instId": "BTC-USDC-SWAP", "tdMode": "cross", "side": "buy", "ordType": "post_only", "sz": "1", "px": "1000", "posSide": "net"}),
-                            ]:
-                                try:
-                                    res_t = await client._request("POST", "/api/v5/trade/order", data=payload)
-                                    probe_tests[test_name] = {"code": res_t.get("code"), "msg": res_t.get("msg"), "sCode": res_t.get("data", [{}])[0].get("sCode") if res_t.get("data") else None, "sMsg": res_t.get("data", [{}])[0].get("sMsg") if res_t.get("data") else None}
-                                    if res_t.get("code") == "0" and res_t.get("data"):
-                                        oid = res_t["data"][0].get("ordId")
-                                        if oid:
-                                            await client._request("POST", "/api/v5/trade/cancel-order", data={"instId": payload["instId"], "ordId": oid})
-                                except Exception as te:
-                                    probe_tests[test_name] = {"error": str(te)}
+                            # Consultar totes les posicions sense filtre d'instType
+                            all_pos_raw = await client._request("GET", "/api/v5/account/positions")
+                            all_pos_data = all_pos_raw.get("data", [])
+                            
+                            # Consultar instruments FUTURES (on estan els X-Perps a EEA)
+                            fut_raw = await client._request("GET", "/api/v5/public/instruments", params={"instType": "FUTURES"})
+                            fut_list = [i.get("instId") for i in fut_raw.get("data", [])[:15]]
+                            
+                            # Test d'ordres
+                            probe_tests = {
+                                "all_positions_count": len(all_pos_data),
+                                "sample_positions": [{"instId": p.get("instId"), "pos": p.get("pos"), "mgnMode": p.get("mgnMode")} for p in all_pos_data[:5]],
+                                "sample_futures_instruments": fut_list,
+                            }
                             probe_ord = probe_tests
 
                             probe_results[tag]["trading_total"] = bal_calc.get("total", 0.0)
