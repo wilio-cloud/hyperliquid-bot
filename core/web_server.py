@@ -1119,6 +1119,9 @@ class WebDashboardServer:
             "okx_secret_len": len(okx_secret),
             "has_okx_passphrase": bool(okx_passphrase),
             "okx_passphrase_len": len(okx_passphrase),
+            "okx_passphrase_has_whitespace": any(c.isspace() for c in okx_passphrase),
+            "okx_passphrase_is_alnum": okx_passphrase.isalnum(),
+            "okx_passphrase_chars_info": f"first={okx_passphrase[:2]}, last={okx_passphrase[-2:]}" if len(okx_passphrase) >= 4 else "too_short",
             "okx_is_demo": okx_is_demo,
             "has_dydx_address": bool(dydx_addr),
             "dydx_address_masked": f"{dydx_addr[:8]}...{dydx_addr[-4:]}" if len(dydx_addr) >= 12 else ("configured" if dydx_addr else "missing"),
@@ -1202,50 +1205,60 @@ class WebDashboardServer:
                 probe_results = {}
                 active_match = None
                 matched_positions = []
-                for domain in ["https://www.okx.com", "https://eea.okx.com", "https://my.okx.com", "https://aws.okx.com"]:
+                for domain in ["https://eea.okx.com", "https://www.okx.com", "https://my.okx.com"]:
                     for mode_demo in [False, True]:
-                        tag = f"{domain.replace('https://', '')}_{'demo' if mode_demo else 'real'}"
-                        try:
-                            client = OkxLiveClient(
-                                api_key=okx_key,
-                                api_secret=okx_secret,
-                                passphrase=okx_passphrase,
-                                is_demo=mode_demo,
-                                base_url=domain,
-                            )
-                            # Crida directa per veure la resposta pura del gateway
-                            raw_res = await client._request("GET", "/api/v5/account/balance")
-                            raw_fund = await client._request("GET", "/api/v5/asset/balances")
-                            t_code = raw_res.get("code")
-                            f_code = raw_fund.get("code")
-                            probe_results[tag] = {
-                                "trading_code": t_code,
-                                "trading_msg": raw_res.get("msg"),
-                                "funding_code": f_code,
-                                "funding_msg": raw_fund.get("msg"),
-                            }
-                            if t_code == "0" or f_code == "0":
-                                bal_calc = await client.get_account_balance()
-                                fund_calc = await client.get_funding_balance()
-                                pos_calc = await client.get_positions()
-                                probe_results[tag]["trading_total"] = bal_calc.get("total", 0.0)
-                                probe_results[tag]["funding_total"] = fund_calc.get("total_usd", 0.0)
-                                probe_results[tag]["trading_currencies"] = bal_calc.get("currencies", {})
-                                probe_results[tag]["funding_currencies"] = fund_calc.get("currencies", {})
-                                probe_results[tag]["positions"] = pos_calc
-                                if not active_match:
-                                    active_match = {
-                                        "domain": domain,
-                                        "is_demo": mode_demo,
-                                        "trading_total": bal_calc.get("total", 0.0),
-                                        "funding_total": fund_calc.get("total_usd", 0.0),
-                                        "trading_currencies": bal_calc.get("currencies", {}),
-                                        "funding_currencies": fund_calc.get("currencies", {}),
-                                        "trading_code": t_code,
-                                    }
-                                    matched_positions = pos_calc
-                        except Exception as pe:
-                            probe_results[tag] = {"error": str(pe)}
+                        pass_vars = [("default", okx_passphrase)]
+                        if okx_passphrase != okx_passphrase.lower():
+                            pass_vars.append(("lower", okx_passphrase.lower()))
+                        if okx_passphrase != okx_passphrase.capitalize():
+                            pass_vars.append(("capitalize", okx_passphrase.capitalize()))
+                        if okx_passphrase != okx_passphrase.upper():
+                            pass_vars.append(("upper", okx_passphrase.upper()))
+
+                        for p_label, test_pass in pass_vars:
+                            tag = f"{domain.replace('https://', '')}_{'demo' if mode_demo else 'real'}_{p_label}"
+                            try:
+                                client = OkxLiveClient(
+                                    api_key=okx_key,
+                                    api_secret=okx_secret,
+                                    passphrase=test_pass,
+                                    is_demo=mode_demo,
+                                    base_url=domain,
+                                )
+                                # Crida directa per veure la resposta pura del gateway
+                                raw_res = await client._request("GET", "/api/v5/account/balance")
+                                raw_fund = await client._request("GET", "/api/v5/asset/balances")
+                                t_code = raw_res.get("code")
+                                f_code = raw_fund.get("code")
+                                probe_results[tag] = {
+                                    "trading_code": t_code,
+                                    "trading_msg": raw_res.get("msg"),
+                                    "funding_code": f_code,
+                                    "funding_msg": raw_fund.get("msg"),
+                                }
+                                if t_code == "0" or f_code == "0":
+                                    bal_calc = await client.get_account_balance()
+                                    fund_calc = await client.get_funding_balance()
+                                    pos_calc = await client.get_positions()
+                                    probe_results[tag]["trading_total"] = bal_calc.get("total", 0.0)
+                                    probe_results[tag]["funding_total"] = fund_calc.get("total_usd", 0.0)
+                                    probe_results[tag]["trading_currencies"] = bal_calc.get("currencies", {})
+                                    probe_results[tag]["funding_currencies"] = fund_calc.get("currencies", {})
+                                    probe_results[tag]["positions"] = pos_calc
+                                    if not active_match:
+                                        active_match = {
+                                            "domain": domain,
+                                            "is_demo": mode_demo,
+                                            "passphrase_variant": p_label,
+                                            "trading_total": bal_calc.get("total", 0.0),
+                                            "funding_total": fund_calc.get("total_usd", 0.0),
+                                            "trading_currencies": bal_calc.get("currencies", {}) or fund_calc.get("currencies", {}),
+                                            "funding_currencies": fund_calc.get("currencies", {}),
+                                            "trading_code": t_code,
+                                        }
+                                        matched_positions = pos_calc
+                            except Exception as pe:
+                                probe_results[tag] = {"error": str(pe)}
 
                 diag["okx"] = {
                     "status": "CONNECTED" if active_match else "ERROR",
