@@ -141,16 +141,19 @@ class HyperliquidLiveClient:
 
     def round_price(self, coin: str, price: float) -> float:
         """
-        Arrodoneix el preu segons les especificacions d'Hyperliquid:
+        Arrodoneix el preu segons les especificacions estrictes d'Hyperliquid:
         - Màxim 5 xifres significatives
-        - Màxim 6 decimals
+        - Màxim 6 - szDecimals decimals
         """
         if price <= 0:
             return price
         import math
+        sz_map = getattr(self, "coin_sz_decimals", COIN_SZ_DECIMALS)
+        sz_decimals = sz_map.get(coin.upper(), 2)
+        max_decimals = max(0, 6 - sz_decimals)
         digits = 5
         decimals = max(0, digits - int(math.floor(math.log10(abs(price)))) - 1)
-        decimals = min(decimals, 6)
+        decimals = min(decimals, max_decimals)
         return round(price, decimals)
 
     async def get_account_state(self) -> Dict[str, Any]:
