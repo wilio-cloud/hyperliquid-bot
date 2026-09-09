@@ -1199,55 +1199,69 @@ class WebDashboardServer:
         if okx_key and okx_secret and okx_passphrase:
             try:
                 from core.okx_live_client import OkxLiveClient
-                okx_test_client = OkxLiveClient(
-                    api_key=okx_key,
-                    api_secret=okx_secret,
-                    passphrase=okx_passphrase,
-                    is_demo=okx_is_demo,
-                )
-                bal_data = await okx_test_client.get_account_balance()
-                funding_data = await okx_test_client.get_funding_balance()
-                pos_data = await okx_test_client.get_positions()
-
-                real_check = {}
-                if okx_is_demo:
-                    try:
-                        okx_real = OkxLiveClient(
-                            api_key=okx_key,
-                            api_secret=okx_secret,
-                            passphrase=okx_passphrase,
-                            is_demo=False,
-                        )
-                        real_bal = await okx_real.get_account_balance()
-                        real_fund = await okx_real.get_funding_balance()
-                        real_check = {
-                            "real_trading_code": real_bal.get("code"),
-                            "real_trading_msg": real_bal.get("msg"),
-                            "real_trading_total": round(real_bal.get("total", 0.0), 2),
-                            "real_trading_currencies": real_bal.get("currencies", {}),
-                            "real_funding_code": real_fund.get("code"),
-                            "real_funding_msg": real_fund.get("msg"),
-                            "real_funding_total": round(real_fund.get("total_usd", 0.0), 2),
-                            "real_funding_currencies": real_fund.get("currencies", {}),
-                        }
-                    except Exception as re:
-                        real_check = {"error": str(re)}
+                probe_results = {}
+                active_match = None
+                matched_positions = []
+                for domain in ["https://www.okx.com", "https://eea.okx.com", "https://my.okx.com", "https://aws.okx.com"]:
+                    for mode_demo in [False, True]:
+                        tag = f"{domain.replace('https://', '')}_{'demo' if mode_demo else 'real'}"
+                        try:
+                            client = OkxLiveClient(
+                                api_key=okx_key,
+                                api_secret=okx_secret,
+                                passphrase=okx_passphrase,
+                                is_demo=mode_demo,
+                                base_url=domain,
+                            )
+                            # Crida directa per veure la resposta pura del gateway
+                            raw_res = await client._request("GET", "/api/v5/account/balance")
+                            raw_fund = await client._request("GET", "/api/v5/asset/balances")
+                            t_code = raw_res.get("code")
+                            f_code = raw_fund.get("code")
+                            probe_results[tag] = {
+                                "trading_code": t_code,
+                                "trading_msg": raw_res.get("msg"),
+                                "funding_code": f_code,
+                                "funding_msg": raw_fund.get("msg"),
+                            }
+                            if t_code == "0" or f_code == "0":
+                                bal_calc = await client.get_account_balance()
+                                fund_calc = await client.get_funding_balance()
+                                pos_calc = await client.get_positions()
+                                probe_results[tag]["trading_total"] = bal_calc.get("total", 0.0)
+                                probe_results[tag]["funding_total"] = fund_calc.get("total_usd", 0.0)
+                                probe_results[tag]["trading_currencies"] = bal_calc.get("currencies", {})
+                                probe_results[tag]["funding_currencies"] = fund_calc.get("currencies", {})
+                                probe_results[tag]["positions"] = pos_calc
+                                if not active_match:
+                                    active_match = {
+                                        "domain": domain,
+                                        "is_demo": mode_demo,
+                                        "trading_total": bal_calc.get("total", 0.0),
+                                        "funding_total": fund_calc.get("total_usd", 0.0),
+                                        "trading_currencies": bal_calc.get("currencies", {}),
+                                        "funding_currencies": fund_calc.get("currencies", {}),
+                                        "trading_code": t_code,
+                                    }
+                                    matched_positions = pos_calc
+                        except Exception as pe:
+                            probe_results[tag] = {"error": str(pe)}
 
                 diag["okx"] = {
-                    "status": "CONNECTED",
-                    "api_response_code": bal_data.get("code"),
-                    "api_response_msg": bal_data.get("msg"),
-                    "total_equity_usd": round(bal_data.get("total", 0.0), 2),
-                    "available_balance_usd": round(bal_data.get("available", 0.0), 2),
-                    "trading_currencies": bal_data.get("currencies", {}),
-                    "funding_total_usd": round(funding_data.get("total_usd", 0.0), 2),
-                    "funding_currencies": funding_data.get("currencies", {}),
-                    "open_positions_count": len(pos_data),
-                    "open_positions": pos_data,
+                    "status": "CONNECTED" if active_match else "ERROR",
+                    "api_response_code": active_match.get("trading_code", "50119") if active_match else "50119",
+                    "api_response_msg": "OK" if active_match else "No match found across all OKX regional endpoints",
+                    "total_equity_usd": round(active_match.get("trading_total", 0.0), 2) if active_match else 0.0,
+                    "available_balance_usd": round(active_match.get("trading_total", 0.0), 2) if active_match else 0.0,
+                    "funding_total_usd": round(active_match.get("funding_total", 0.0), 2) if active_match else 0.0,
+                    "trading_currencies": active_match.get("trading_currencies", {}) if active_match else {},
+                    "funding_currencies": active_match.get("funding_currencies", {}) if active_match else {},
+                    "open_positions_count": len(matched_positions),
+                    "open_positions": matched_positions,
                     "is_demo": okx_is_demo,
-                    "resolved_base_url": okx_test_client.base_url,
-                    "credentials_valid": (bal_data.get("code") == "0"),
-                    "real_account_audit": real_check,
+                    "active_match": active_match,
+                    "credentials_valid": bool(active_match),
+                    "probe_matrix": probe_results,
                 }
             except Exception as oe:
                 diag["okx"] = {
