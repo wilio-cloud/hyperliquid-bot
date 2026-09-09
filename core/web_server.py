@@ -1241,24 +1241,24 @@ class WebDashboardServer:
                             cfg_res = await client._request("GET", "/api/v5/account/config")
                             acct_cfg = cfg_res.get("data", [{}])[0] if cfg_res.get("code") == "0" else {}
                             
-                            # Test direct d'ordre per comprovar permisos de mercat (50124)
-                            probe_ord = await client._request(
-                                "POST",
-                                "/api/v5/trade/order",
-                                data={
-                                    "instId": "INJ-USDT-SWAP",
-                                    "tdMode": "cross",
-                                    "side": "buy",
-                                    "ordType": "post_only",
-                                    "sz": "1",
-                                    "px": "0.1",
-                                    "posSide": "net",
-                                },
-                            )
-                            if probe_ord.get("code") == "0" and probe_ord.get("data"):
-                                oid = probe_ord["data"][0].get("ordId")
-                                if oid:
-                                    await client._request("POST", "/api/v5/trade/cancel-order", data={"instId": "INJ-USDT-SWAP", "ordId": oid})
+                            # Test exhaustiu de mercats i tipus d'ordre a OKX per diagnosticar 50124
+                            probe_tests = {}
+                            for test_name, payload in [
+                                ("spot_btc_usdc", {"instId": "BTC-USDC", "tdMode": "cash", "side": "buy", "ordType": "post_only", "sz": "0.0001", "px": "1000"}),
+                                ("swap_inj_usdt", {"instId": "INJ-USDT-SWAP", "tdMode": "cross", "side": "buy", "ordType": "post_only", "sz": "1", "px": "0.1", "posSide": "net"}),
+                                ("swap_inj_usdc_ccy", {"instId": "INJ-USDT-SWAP", "tdMode": "cross", "side": "buy", "ordType": "post_only", "sz": "1", "px": "0.1", "posSide": "net", "ccy": "USDC"}),
+                                ("swap_btc_usdc", {"instId": "BTC-USDC-SWAP", "tdMode": "cross", "side": "buy", "ordType": "post_only", "sz": "1", "px": "1000", "posSide": "net"}),
+                            ]:
+                                try:
+                                    res_t = await client._request("POST", "/api/v5/trade/order", data=payload)
+                                    probe_tests[test_name] = {"code": res_t.get("code"), "msg": res_t.get("msg"), "sCode": res_t.get("data", [{}])[0].get("sCode") if res_t.get("data") else None, "sMsg": res_t.get("data", [{}])[0].get("sMsg") if res_t.get("data") else None}
+                                    if res_t.get("code") == "0" and res_t.get("data"):
+                                        oid = res_t["data"][0].get("ordId")
+                                        if oid:
+                                            await client._request("POST", "/api/v5/trade/cancel-order", data={"instId": payload["instId"], "ordId": oid})
+                                except Exception as te:
+                                    probe_tests[test_name] = {"error": str(te)}
+                            probe_ord = probe_tests
 
                             probe_results[tag]["trading_total"] = bal_calc.get("total", 0.0)
                             probe_results[tag]["funding_total"] = fund_calc.get("total_usd", 0.0)
