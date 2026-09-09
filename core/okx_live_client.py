@@ -298,7 +298,15 @@ class OkxLiveClient:
         return round(price, decimals)
 
     async def get_balance(self) -> float:
-        """Retorna el saldo disponible en USDT o USDC a OKX (float) per a ús directe a l'exchange."""
+        """Retorna el patrimoni total (Total Equity) en USDT o USDC a OKX (float) per a ús directe a l'exchange."""
+        bal_data = await self.get_account_balance()
+        total = float(bal_data.get("total", 0.0))
+        if total > 0:
+            return total
+        return float(bal_data.get("available", 0.0))
+
+    async def get_available_balance(self) -> float:
+        """Retorna el marge lliure disponible en USDT o USDC a OKX (sense comptar marge retingut)."""
         bal_data = await self.get_account_balance()
         return float(bal_data.get("available", 0.0))
 

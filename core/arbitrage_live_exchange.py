@@ -269,12 +269,23 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             if isinstance(aevo_bal, (int, float)) and aevo_bal > 0:
                 self.bn_balance_usd = float(aevo_bal)
 
-            if not self.closed_positions and not self.active_positions:
-                self.initial_total_balance = self.total_balance_usd
+            # Obtenir marge lliure disponible per a verificació prèvia a l'obertura
+            if hasattr(self.aevo_client, "get_available_balance"):
+                try:
+                    avail = await self.aevo_client.get_available_balance()
+                    self.bn_avail_usd = float(avail)
+                except Exception:
+                    self.bn_avail_usd = self.bn_balance_usd
+            else:
+                self.bn_avail_usd = self.bn_balance_usd
+
+            # Si encara no s'ha tancat cap posició, el balanç de referència és l'equity real inicial (evitant salts per marge bloquejat)
+            if not self.closed_positions:
+                self.initial_total_balance = self.total_balance_usd + getattr(self, "total_fees_paid", 0.0)
 
             logger.info(
                 f"Saldos reals sincronitzats: Hyperliquid = {self.hl_balance_usd:.2f}$ | "
-                f"{self.venue2_name} = {self.bn_balance_usd:.2f}$ | Total = {self.total_balance_usd:.2f}$"
+                f"{self.venue2_name} = {self.bn_balance_usd:.2f}$ (Lliure: {getattr(self, 'bn_avail_usd', self.bn_balance_usd):.2f}$) | Total = {self.total_balance_usd:.2f}$"
             )
             await self.reconcile_active_positions()
             if self.hl_client.referral_code:
@@ -330,10 +341,11 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
         # Comprovació de capital disponible
         required_margin = size_usd / self.leverage
-        if self.hl_balance_usd < required_margin or self.bn_balance_usd < required_margin:
+        bn_avail = getattr(self, "bn_avail_usd", self.bn_balance_usd)
+        if self.hl_balance_usd < required_margin or bn_avail < required_margin:
             logger.warning(
                 f"Capital insuficient per obrir {signal.coin}: requerit {required_margin:.1f}$, "
-                f"HL={self.hl_balance_usd:.1f}$, Aevo={self.bn_balance_usd:.1f}$"
+                f"HL={self.hl_balance_usd:.1f}$, {self.venue2_name}={bn_avail:.1f}$"
             )
             return None
 

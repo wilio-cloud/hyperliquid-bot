@@ -463,3 +463,28 @@ def test_okx_xperp_discovery_and_order():
             assert call_kwargs["data"]["px"] == "2.58"
 
     asyncio.run(_test())
+
+
+def test_okx_balance_total_equity_vs_available():
+    """Verifica que get_balance() retorna el patrimoni total (equity) i get_available_balance() el marge lliure."""
+    async def _test():
+        client = OkxLiveClient("k", "s", "p", base_url="https://www.okx.com")
+        mock_bal_res = {
+            "code": "0",
+            "data": [{
+                "totalEq": "450.40",
+                "details": [{
+                    "ccy": "USDC",
+                    "availBal": "361.36",
+                    "eq": "450.40",
+                }]
+            }]
+        }
+        with patch.object(client, "_request", return_value=mock_bal_res):
+            total_bal = await client.get_balance()
+            avail_bal = await client.get_available_balance()
+
+            assert total_bal == 450.40
+            assert avail_bal == 361.36
+
+    asyncio.run(_test())
