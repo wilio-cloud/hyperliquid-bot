@@ -113,6 +113,10 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             existing_active_coins = {p.coin.upper(): pair_id for pair_id, p in self.active_positions.items()}
 
             for coin in list(self._open_broker_coins):
+                if coin in self._pending_opens:
+                    logger.debug(f"Reconciliació: {coin} té una ordre d'obertura en curs. Ometent temporalment.")
+                    continue
+
                 hl_pos = hl_positions_map.get(coin)
                 aevo_pos = aevo_positions_map.get(coin)
 
