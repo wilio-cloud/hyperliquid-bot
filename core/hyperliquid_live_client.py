@@ -238,9 +238,9 @@ class HyperliquidLiveClient:
         if rounded_sz <= 0:
             return {"status": "err", "error": f"Mida invàlida per a {coin}: {size}"}
 
-        # Collar de seguretat de 0.05% per a ordres IOC per assegurar fill immediat al millor preu
+        # Collar de seguretat de 0.25% per a ordres IOC per assegurar fill immediat al millor preu
         if ioc:
-            collar_px = target_price * (1.0005 if is_buy else 0.9995)
+            collar_px = target_price * (1.0025 if is_buy else 0.9975)
             rounded_px = self.round_price(hl_coin, collar_px)
         else:
             rounded_px = self.round_price(hl_coin, target_price)

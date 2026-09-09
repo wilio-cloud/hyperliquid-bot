@@ -74,6 +74,11 @@ class OkxWSClient:
         "SEI": 10.0,
         "INJ": 0.1,
         "UNI": 1.0,
+        "HYPE": 0.1,
+        "PEPE": 1000000.0,
+        "PUMP": 1000.0,
+        "WIF": 1.0,
+        "RENDER": 1.0,
     }
 
     def __init__(

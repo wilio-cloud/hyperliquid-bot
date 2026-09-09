@@ -308,7 +308,7 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         target_coins = coins or [
             "ETH", "BTC", "SOL", "SUI", "NEAR", "LINK", "AVAX",
             "ARB", "OP", "APT", "SEI", "TIA", "RENDER", "INJ",
-            "ENA", "DOGE", "WIF", "AAVE", "UNI"
+            "ENA", "DOGE", "WIF", "AAVE", "UNI", "HYPE", "PUMP", "PEPE"
         ]
         logger.info(f"⚡ [LEVERAGE] Aplicant {lev}x Cross Margin a Hyperliquid i {self.venue2_name} per a {len(target_coins)} monedes...")
 
@@ -537,6 +537,36 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                         except Exception as se:
                             logger.debug(f"Error verificant estat post-cancel·lació per {coin}: {se}")
 
+                        # ⚡ FALLBACK TAKER IOC: Si no s'ha omplert com a Maker en 3s,
+                        # comprovem si l'spread actual encara cobreix comissions Taker (>= 0.160%).
+                        # Si és així, executem immediatament com a Taker per assegurar l'obertura de l'operació!
+                        if not hl_ok:
+                            latest_hl = self._last_hl_books.get(coin)
+                            latest_bn = self._last_bn_books.get(coin)
+                            if latest_hl and latest_bn and latest_hl.best_bid and latest_hl.best_ask and latest_bn.best_bid and latest_bn.best_ask:
+                                cur_hl_px = latest_hl.best_ask if hl_is_buy else latest_hl.best_bid
+                                cur_bn_px = latest_bn.best_bid if hl_is_buy else latest_bn.best_ask
+                                cur_mid = (cur_hl_px + cur_bn_px) / 2.0
+                                cur_spr = ((cur_bn_px - cur_hl_px) / cur_mid * 100.0) if hl_is_buy else ((cur_hl_px - cur_bn_px) / cur_mid * 100.0)
+                                if cur_spr >= 0.160:
+                                    logger.info(f"⚡ [TAKER FALLBACK] Oportunitat viva a {coin} (Spread {cur_spr:.3f}% >= 0.160%). Executant com a Taker IOC...")
+                                    try:
+                                        agg_taker_px = cur_hl_px * (1.0025 if hl_is_buy else 0.9975)
+                                        fb_res = await self.hl_client.place_order(
+                                            coin=coin,
+                                            is_buy=hl_is_buy,
+                                            size=hl_sz,
+                                            price=agg_taker_px,
+                                            post_only=False,
+                                            ioc=True,
+                                        )
+                                        if isinstance(fb_res, dict) and fb_res.get("status") == "ok":
+                                            hl_ok = True
+                                            hl_fill_type = "TAKER_FALLBACK"
+                                            logger.info(f"✅ Taker Fallback {coin} executat amb èxit!")
+                                    except Exception as fbe:
+                                        logger.debug(f"Error en Taker fallback {coin}: {fbe}")
+
             # Si Hyperliquid no s'omple o falla, avortem immediatament sense tocar Aevo (0 risc, 0 exposició)
             if not hl_ok:
                 logger.warning(
@@ -684,11 +714,13 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
             # Tancament seqüencial: Primer tanquem Hyperliquid (Sempre Taker IOC per evitar ordres resting penjades)
             try:
+                # Buffer de seguretat de 0.25% per assegurar execució immediata IOC al millor preu disponible sense rebuig
+                agg_hl_exit_px = hl_exit_price * (1.0025 if hl_is_buy_to_close else 0.9975)
                 hl_res = await self.hl_client.place_order(
                     coin=coin,
                     is_buy=hl_is_buy_to_close,
                     size=pos.leg_hl.size,
-                    price=hl_exit_price,
+                    price=agg_hl_exit_px,
                     post_only=False,
                     ioc=True,
                 )

@@ -69,6 +69,8 @@ class CrossExchangeArbitrageStrategy:
             "INJ": 0.260,
             "ZEC": 0.250,
             "WIF": 0.250,
+            "PEPE": 0.250,
+            "RENDER": 0.250,
         }
 
         self.hl_books: Dict[str, OrderBookL2] = {}

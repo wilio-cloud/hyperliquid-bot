@@ -987,8 +987,9 @@ def main():
             coins = default_coins
         elif args.venue2 == "okx":
             default_coins = [
-                "BTC", "ETH", "SOL", "SUI", "NEAR", "AVAX", "LINK",
-                "DOGE", "ARB", "OP", "APT", "SEI", "INJ", "UNI"
+                "HYPE", "PUMP", "PEPE", "WIF", "SUI", "NEAR", "DOGE",
+                "ARB", "OP", "APT", "SEI", "INJ", "UNI", "RENDER",
+                "LINK", "AVAX", "SOL", "ETH", "BTC"
             ]
             coins = default_coins
         elif args.venue2 == "vertex":
