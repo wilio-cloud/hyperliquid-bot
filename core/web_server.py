@@ -1097,9 +1097,9 @@ class WebDashboardServer:
         dydx_addr = os.getenv("DYDX_ADDRESS", "").strip()
         dydx_mnemonic = (os.getenv("DYDX_MNEMONIC") or "").strip()
         dydx_pk = (os.getenv("DYDX_PRIVATE_KEY") or os.getenv("DYDX_PRIVATE") or "").strip()
-        okx_key = os.getenv("OKX_API_KEY", "").strip()
-        okx_secret = os.getenv("OKX_API_SECRET", "").strip()
-        okx_passphrase = os.getenv("OKX_PASSPHRASE", "").strip()
+        okx_key = (os.getenv("OKX_API_KEY") or "").strip().strip('"').strip("'")
+        okx_secret = (os.getenv("OKX_API_SECRET") or "").strip().strip('"').strip("'")
+        okx_passphrase = (os.getenv("OKX_PASSPHRASE") or "").strip().strip('"').strip("'")
         okx_is_demo = os.getenv("OKX_IS_DEMO", "false").lower() in ("1", "true", "yes")
         exec_mode = os.getenv("EXECUTION_MODE", "paper").strip().lower()
         venue2 = os.getenv("VENUE2", "okx").strip().lower()
@@ -1114,8 +1114,11 @@ class WebDashboardServer:
             "hl_agent_key_len": len(hl_key) if hl_key else 0,
             "has_okx_key": bool(okx_key),
             "okx_key_masked": f"{okx_key[:4]}...{okx_key[-4:]}" if len(okx_key) >= 8 else ("configured" if okx_key else "missing"),
+            "okx_key_len": len(okx_key),
             "has_okx_secret": bool(okx_secret),
+            "okx_secret_len": len(okx_secret),
             "has_okx_passphrase": bool(okx_passphrase),
+            "okx_passphrase_len": len(okx_passphrase),
             "okx_is_demo": okx_is_demo,
             "has_dydx_address": bool(dydx_addr),
             "dydx_address_masked": f"{dydx_addr[:8]}...{dydx_addr[-4:]}" if len(dydx_addr) >= 12 else ("configured" if dydx_addr else "missing"),
@@ -1242,7 +1245,8 @@ class WebDashboardServer:
                     "open_positions_count": len(pos_data),
                     "open_positions": pos_data,
                     "is_demo": okx_is_demo,
-                    "credentials_valid": True,
+                    "resolved_base_url": okx_test_client.base_url,
+                    "credentials_valid": (bal_data.get("code") == "0"),
                     "real_account_audit": real_check,
                 }
             except Exception as oe:

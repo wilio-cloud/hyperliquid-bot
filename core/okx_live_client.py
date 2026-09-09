@@ -66,15 +66,15 @@ class OkxLiveClient:
         is_demo: Optional[bool] = None,
         base_url: Optional[str] = None,
     ):
-        self.api_key = api_key or os.environ.get("OKX_API_KEY", "")
-        self.api_secret = api_secret or os.environ.get("OKX_API_SECRET", "")
-        self.passphrase = passphrase or os.environ.get("OKX_PASSPHRASE", "")
+        self.api_key = (api_key or os.environ.get("OKX_API_KEY", "")).strip().strip('"').strip("'")
+        self.api_secret = (api_secret or os.environ.get("OKX_API_SECRET", "")).strip().strip('"').strip("'")
+        self.passphrase = (passphrase or os.environ.get("OKX_PASSPHRASE", "")).strip().strip('"').strip("'")
         self.is_demo = (
             is_demo
             if is_demo is not None
             else (os.environ.get("OKX_IS_DEMO", "false").lower() in ("1", "true", "yes"))
         )
-        self.base_url = base_url or os.environ.get("OKX_REST_URL", "https://www.okx.com")
+        self.base_url = (base_url or os.environ.get("OKX_REST_URL", "https://www.okx.com")).strip().rstrip("/")
         self._ssl_context = get_ssl_context()
         self.contract_specs: Dict[str, dict] = {}
         self._specs_initialized = False
@@ -89,7 +89,7 @@ class OkxLiveClient:
         mac = hmac.new(self.api_secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256)
         return base64.b64encode(mac.digest()).decode("utf-8")
 
-    def _get_headers(self, method: str, request_path: str, body: str = "") -> dict:
+    def _get_headers(self, method: str, request_path: str, body: str = "", override_demo: Optional[bool] = None) -> dict:
         """Genera els headers d'autenticació per a una petició REST d'OKX V5."""
         now = datetime.datetime.now(datetime.timezone.utc)
         ts = now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
@@ -101,12 +101,13 @@ class OkxLiveClient:
             "OK-ACCESS-PASSPHRASE": self.passphrase,
             "Content-Type": "application/json",
         }
-        if self.is_demo:
+        demo_flag = self.is_demo if override_demo is None else override_demo
+        if demo_flag:
             headers["x-simulated-trading"] = "1"
         return headers
 
     async def _request(self, method: str, path: str, params: Optional[dict] = None, data: Optional[dict] = None) -> dict:
-        """Executa una crida HTTP asíncrona signada contra OKX V5."""
+        """Executa una crida HTTP asíncrona signada contra OKX V5 amb fallback automàtic per a EEA/Europa."""
         url = f"{self.base_url}{path}"
         query_str = ""
         if params:
@@ -128,6 +129,29 @@ class OkxLiveClient:
                     timeout=aiohttp.ClientTimeout(total=8.0),
                 ) as resp:
                     res_json = await resp.json()
+
+                    # Fallback 1: Si retorna 50119 ("API key doesn't exist"), provar domini europeu eea.okx.com
+                    if res_json.get("code") == "50119":
+                        for alt_domain in ["https://eea.okx.com", "https://my.okx.com"]:
+                            if alt_domain == self.base_url:
+                                continue
+                            alt_url = f"{alt_domain}{path}{query_str}"
+                            try:
+                                async with session.request(
+                                    method=method.upper(),
+                                    url=alt_url,
+                                    headers=headers,
+                                    data=body_str if body_str else None,
+                                    timeout=aiohttp.ClientTimeout(total=8.0),
+                                ) as alt_resp:
+                                    alt_json = await alt_resp.json()
+                                    if alt_json.get("code") == "0":
+                                        logger.info(f"Connexió OKX exitosa amb el domini regional: {alt_domain}")
+                                        self.base_url = alt_domain
+                                        return alt_json
+                            except Exception:
+                                pass
+
                     return res_json
         except Exception as e:
             logger.error(f"Error HTTP en petició OKX ({method} {path}): {e}")
