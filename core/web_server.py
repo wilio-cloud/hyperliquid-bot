@@ -234,10 +234,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         <th>Delta Net</th>
                         <th>Funding Cobrat</th>
                         <th>PnL No Realitzat</th>
+                        <th>Estat / Sortida</th>
                     </tr>
                 </thead>
                 <tbody id="positions-body">
-                    <tr><td colspan="7" style="text-align: center; color: #64748b;">Sense posicions d'arbitratge actives actualment</td></tr>
+                    <tr><td colspan="8" style="text-align: center; color: #64748b;">Sense posicions d'arbitratge actives actualment</td></tr>
                 </tbody>
             </table>
         </div>
@@ -812,7 +813,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         const bnPx = (p.leg_bn && p.leg_bn.entry_price) ? p.leg_bn.entry_price.toFixed(2) : '-';
                         const bnSz = (p.leg_bn && p.leg_bn.size_usd) ? p.leg_bn.size_usd.toFixed(0) : '-';
 
-                        const carryBadge = (p.strategy_type === 'FUNDING_CARRY') ? ' <span style="font-size: 0.65rem; background: #8b5cf6; color: #fff; padding: 2px 5px; border-radius: 4px; vertical-align: middle;">CARRY</span>' : '';
+                        const exitDiag = p.exit_diagnostic || 'Monitoritzant';
                         return `<tr>
                             <td style="font-weight: bold; color: #facc15;">${p.coin}${carryBadge}</td>
                             <td style="font-weight: bold; color: #38bdf8;">${p.direction}</td>
@@ -821,11 +822,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                             <td style="color: #10b981; font-weight: bold;">0.00 (Neutral)</td>
                             <td style="color: #c084fc;">${((p.accumulated_funding || 0) >= 0 ? '+' : '') + fmtNum(p.accumulated_funding, 4)}$</td>
                             <td class="${pnlColor}" style="font-weight: bold;">${(pnlVal >= 0 ? '+' : '') + pnlVal.toFixed(3)}$</td>
+                            <td style="font-size: 0.8rem; color: #94a3b8;">${exitDiag}</td>
                         </tr>`;
                     }).join('');
                 } else {
                     posCount.innerText = `0 / ${maxPos} posicions`;
-                    posBody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b;">Sense posicions actives en curs</td></tr>';
+                    posBody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #64748b;">Sense posicions actives en curs</td></tr>';
                 }
 
                 // Taula Control i Rendiment per Criptomoneda
@@ -969,6 +971,7 @@ class WebDashboardServer:
                         },
                         "strategy_type": getattr(p, "strategy_type", "SPREAD_SCALP"),
                         "current_net_apr": getattr(p, "current_net_apr", 0.0),
+                        "exit_diagnostic": getattr(p, "exit_diagnostic", "Monitoritzant"),
                     }
                     for p in self.exchange.active_positions.values()
                 ]

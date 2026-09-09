@@ -280,3 +280,8 @@ class FundingCarryStrategy:
                 pos.divergence_start_time = None
 
         return None
+
+    def get_exit_diagnostic(self, pos: ArbitragePosition) -> str:
+        """Retorna un diagnòstic de sortida per a posicions de Funding Carry."""
+        apr = getattr(pos, "current_net_apr", 0.0)
+        return f"Collita de Funding activa (APR: {apr:.1f}%)"

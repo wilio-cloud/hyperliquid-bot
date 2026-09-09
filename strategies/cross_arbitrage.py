@@ -391,16 +391,71 @@ class CrossExchangeArbitrageStrategy:
         # Mai sortim en negatiu per temps. Com que som 100% delta-neutral, esperem la convergència.
         # Només permetem sortida si el PnL net és sòlidament positiu després de totes les comissions:
         pos_age = time.time() - pos.entry_time
-        # A) Si porta > 15 minuts (900s) i el PnL net és >= +0.15$, tanca ràpid per alliberar la ranura
-        if pos_age >= 900.0 and projected_net_pnl >= 0.15:
+        time_quick_tp = max(0.020, order_size_usd * 0.0006)
+        time_breakeven_tp = max(0.012, order_size_usd * 0.0004)
+        time_slot_free_tp = max(0.005, order_size_usd * 0.0002)
+
+        # A) Si porta > 15 minuts (900s) i el PnL net és >= quick_tp, tanca ràpid per alliberar la ranura
+        if pos_age >= 900.0 and projected_net_pnl >= time_quick_tp:
             return ("TIME_QUICK_PROFIT", hl_exit_px, bn_exit_px)
 
-        # B) Si porta > 30 minuts (1800s) i el PnL net és >= +0.08$, tanca amb guany net
-        if pos_age >= 1800.0 and projected_net_pnl >= 0.08:
+        # B) Si porta > 30 minuts (1800s) i el PnL net és >= breakeven_tp, tanca amb guany net
+        if pos_age >= 1800.0 and projected_net_pnl >= time_breakeven_tp:
             return ("TIME_BREAKEVEN", hl_exit_px, bn_exit_px)
 
-        # C) Si porta > 45 minuts (2700s) i el PnL net cobreix amb escreix totes les comissions reals (>= +0.04$), allibera ranura
-        if pos_age >= 2700.0 and projected_net_pnl >= 0.04:
+        # C) Si porta > 45 minuts (2700s) i el PnL net cobreix amb escreix totes les comissions reals, allibera ranura
+        if pos_age >= 2700.0 and projected_net_pnl >= time_slot_free_tp:
             return ("TIME_SLOT_FREE", hl_exit_px, bn_exit_px)
 
         return None
+
+    def get_exit_diagnostic(self, pos: ArbitragePosition) -> str:
+        """Retorna un diagnòstic clar en català sobre l'estat actual de sortida de la posició."""
+        hl_book = self.hl_books.get(pos.coin)
+        bn_book = self.bn_books.get(pos.coin)
+        if not hl_book or not bn_book or not (hl_book.best_bid and hl_book.best_ask and bn_book.best_bid and bn_book.best_ask):
+            return "Sense dades de llibre"
+
+        hl_inner = ((hl_book.best_ask - hl_book.best_bid) / hl_book.mid_price) * 100.0 if hl_book.mid_price > 0 else 0.0
+        bn_inner = ((bn_book.best_ask - bn_book.best_bid) / bn_book.mid_price) * 100.0 if bn_book.mid_price > 0 else 0.0
+        if hl_inner > self.max_book_spread_pct:
+            return f"🛡️ Protegit: Llibre HL buit ({hl_inner:.2f}% > {self.max_book_spread_pct:.2f}%)"
+        if bn_inner > self.max_book_spread_pct:
+            return f"🛡️ Protegit: Llibre dYdX buit ({bn_inner:.2f}% > {self.max_book_spread_pct:.2f}%)"
+
+        global_mid = (hl_book.mid_price + bn_book.mid_price) / 2.0
+        if pos.direction == ArbitrageDirection.SELL_HL_BUY_BN:
+            hl_exit_px = hl_book.best_ask
+            bn_exit_px = bn_book.best_bid
+            current_spread_to_close = ((hl_exit_px - bn_exit_px) / global_mid) * 100.0
+            hl_gross = (pos.leg_hl.entry_price - hl_exit_px) * pos.leg_hl.size
+            bn_gross = (bn_exit_px - pos.leg_bn.entry_price) * pos.leg_bn.size
+        else:
+            hl_exit_px = hl_book.best_bid
+            bn_exit_px = bn_book.best_ask
+            current_spread_to_close = ((bn_exit_px - hl_exit_px) / global_mid) * 100.0
+            hl_gross = (hl_exit_px - pos.leg_hl.entry_price) * pos.leg_hl.size
+            bn_gross = (pos.leg_bn.entry_price - bn_exit_px) * pos.leg_bn.size
+
+        venue2_name = getattr(pos.leg_bn, "venue", "AEVO").upper()
+        venue2_fee_rate = 0.00050 if ("AEVO" in venue2_name or "DYDX" in venue2_name) else 0.00040
+        hl_exit_fee = pos.leg_hl.size * hl_exit_px * 0.00045
+        bn_exit_fee = pos.leg_bn.size * bn_exit_px * venue2_fee_rate
+        projected_total_fees = pos.total_fees + hl_exit_fee + bn_exit_fee
+        projected_net_pnl = (hl_gross + bn_gross) + pos.accumulated_funding - projected_total_fees
+
+        order_size_usd = pos.leg_hl.size * pos.leg_hl.entry_price
+        target_tp = max(0.030, order_size_usd * 0.0010)
+        target_min_profit = max(0.015, order_size_usd * 0.0005)
+
+        max_conv_spread = max(self.target_exit_spread_pct, 0.040)
+        is_converged = (current_spread_to_close <= max_conv_spread or current_spread_to_close <= pos.entry_spread_pct * 0.40)
+
+        if projected_net_pnl >= target_tp:
+            return f"🎯 Take Profit assolit (+{projected_net_pnl:.3f}$)"
+        elif is_converged and projected_net_pnl >= target_min_profit:
+            return f"✅ Convergit i rendible (+{projected_net_pnl:.3f}$)"
+        elif is_converged:
+            return f"⏳ Convergit ({current_spread_to_close:.3f}%), esperant net (+{projected_net_pnl:.3f}$ / +{target_min_profit:.3f}$)"
+        else:
+            return f"⏳ Esperant convergència (Spread: {current_spread_to_close:.3f}% -> {max_conv_spread:.3f}%)"

@@ -472,6 +472,11 @@ class ArbitrageTradingBotApp:
                     "size_usd": p.leg_bn.size_usd,
                 },
                 "strategy_type": getattr(p, "strategy_type", "SPREAD_SCALP"),
+                "exit_diagnostic": (
+                    self.carry_strategy.get_exit_diagnostic(p)
+                    if getattr(p, "strategy_type", "SPREAD_SCALP") == "FUNDING_CARRY"
+                    else self.strategy.get_exit_diagnostic(p)
+                ),
             }
             for p in self.exchange.active_positions.values()
         ]
