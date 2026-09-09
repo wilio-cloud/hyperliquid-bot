@@ -188,23 +188,44 @@ class OkxLiveClient:
         return round(price, decimals)
 
     async def get_balance(self) -> float:
-        """Retorna el saldo disponible en USDT a OKX (float) per a ús directe a l'exchange."""
+        """Retorna el saldo disponible en USDT o USDC a OKX (float) per a ús directe a l'exchange."""
         bal_data = await self.get_account_balance()
         return float(bal_data.get("available", 0.0))
 
-    async def get_account_balance(self) -> Dict[str, float]:
-        """Consulta el balanç complet del compte a OKX (USDT)."""
-        res = await self._request("GET", "/api/v5/account/balance", params={"ccy": "USDT"})
+    async def get_account_balance(self, ccy: Optional[str] = None) -> Dict[str, Any]:
+        """Consulta el balanç complet del compte unificat de trading a OKX (Trading Account)."""
+        params = {"ccy": ccy} if ccy else None
+        res = await self._request("GET", "/api/v5/account/balance", params=params)
         avail_bal = 0.0
         total_equity = 0.0
+        currencies = {}
         if res.get("code") == "0" and res.get("data"):
             details = res["data"][0].get("details", [])
             for d in details:
-                if d.get("ccy") == "USDT":
-                    avail_bal = float(d.get("availBal", d.get("availEq", 0.0)))
-                    total_equity = float(d.get("eq", avail_bal))
-                    break
-        return {"available": avail_bal, "total": total_equity}
+                c = d.get("ccy")
+                avail = float(d.get("availBal", d.get("availEq", 0.0)))
+                eq = float(d.get("eq", avail))
+                currencies[c] = {"available": avail, "total": eq}
+                if c in ("USDT", "USDC"):
+                    avail_bal += avail
+                    total_equity += eq
+        return {"available": avail_bal, "total": total_equity, "currencies": currencies, "raw": res.get("data")}
+
+    async def get_funding_balance(self, ccy: Optional[str] = None) -> Dict[str, Any]:
+        """Consulta el balanç del compte de finançament (Funding Account / Dipòsits) a OKX."""
+        params = {"ccy": ccy} if ccy else None
+        res = await self._request("GET", "/api/v5/asset/balances", params=params)
+        currencies = {}
+        total_usd = 0.0
+        if res.get("code") == "0" and res.get("data"):
+            for d in res.get("data", []):
+                c = d.get("ccy")
+                avail = float(d.get("availBal", 0.0))
+                bal = float(d.get("bal", avail))
+                currencies[c] = {"available": avail, "balance": bal}
+                if c in ("USDT", "USDC"):
+                    total_usd += bal
+        return {"total_usd": total_usd, "currencies": currencies, "raw": res.get("data")}
 
     async def get_positions(self) -> List[Dict[str, Any]]:
         """Consulta les posicions perpètues obertes a OKX."""

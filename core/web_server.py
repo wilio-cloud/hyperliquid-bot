@@ -1203,15 +1203,41 @@ class WebDashboardServer:
                     is_demo=okx_is_demo,
                 )
                 bal_data = await okx_test_client.get_account_balance()
+                funding_data = await okx_test_client.get_funding_balance()
                 pos_data = await okx_test_client.get_positions()
+
+                real_check = {}
+                if okx_is_demo:
+                    try:
+                        okx_real = OkxLiveClient(
+                            api_key=okx_key,
+                            api_secret=okx_secret,
+                            passphrase=okx_passphrase,
+                            is_demo=False,
+                        )
+                        real_bal = await okx_real.get_account_balance()
+                        real_fund = await okx_real.get_funding_balance()
+                        real_check = {
+                            "real_trading_total": round(real_bal.get("total", 0.0), 2),
+                            "real_trading_currencies": real_bal.get("currencies", {}),
+                            "real_funding_total": round(real_fund.get("total_usd", 0.0), 2),
+                            "real_funding_currencies": real_fund.get("currencies", {}),
+                        }
+                    except Exception as re:
+                        real_check = {"error": str(re)}
+
                 diag["okx"] = {
                     "status": "CONNECTED",
                     "total_equity_usd": round(bal_data.get("total", 0.0), 2),
                     "available_balance_usd": round(bal_data.get("available", 0.0), 2),
+                    "trading_currencies": bal_data.get("currencies", {}),
+                    "funding_total_usd": round(funding_data.get("total_usd", 0.0), 2),
+                    "funding_currencies": funding_data.get("currencies", {}),
                     "open_positions_count": len(pos_data),
                     "open_positions": pos_data,
                     "is_demo": okx_is_demo,
                     "credentials_valid": True,
+                    "real_account_audit": real_check,
                 }
             except Exception as oe:
                 diag["okx"] = {
@@ -1295,13 +1321,29 @@ class WebDashboardServer:
         if venue2 == "okx":
             okx_connected = diag["okx"].get("status") == "CONNECTED"
             okx_eq = diag["okx"].get("total_equity_usd", 0.0)
-            has_okx_funds = okx_eq >= 10.0
+            real_audit = diag["okx"].get("real_account_audit", {})
+            real_trad = real_audit.get("real_trading_total", 0.0)
+            real_fund = real_audit.get("real_funding_total", 0.0)
+
+            if okx_eq >= 10.0:
+                fons_text = f"✅ ${okx_eq} (Compte Actiu)"
+                has_okx_funds = True
+            elif real_trad >= 10.0:
+                fons_text = f"✅ ${real_trad} al Compte Real de Trading (Desactiva OKX_IS_DEMO per usar-los)"
+                has_okx_funds = True
+            elif real_fund >= 10.0:
+                fons_text = f"⚠️ ${real_fund} al Compte de Finançament/Funding (Cal moure a Trading dins d'OKX)"
+                has_okx_funds = False
+            else:
+                fons_text = f"⚠️ Menys de 10$ USDT (${okx_eq})"
+                has_okx_funds = False
+
             checklist = [
                 f"Hyperliquid API: {'✅ CONNECTAT' if hl_ok else '❌ FALTA O ERROR'}",
                 f"Hyperliquid Fons: {'✅ $' + str(diag['hyperliquid'].get('account_value_usd', 0)) if has_hl_funds else '⚠️ Menys de 10$ USDC'}",
                 f"OKX Perpetuals API: {'✅ CONNECTAT' if okx_connected else '❌ FALTA O ERROR (Revisa OKX_API_KEY/SECRET/PASSPHRASE)'}",
                 f"OKX Credencials: {'✅ VÀLIDES' if okx_connected else '❌ ERROR O NO CONFIGURADES'}",
-                f"OKX Fons: {'✅ $' + str(okx_eq) if has_okx_funds else f'⚠️ Menys de 10$ USDT (${okx_eq})'}",
+                f"OKX Fons: {fons_text}",
                 f"Mode d'Execució a Railway: {'⚡ LIVE (REAL)' if exec_mode == 'live' else '📄 PAPER (SIMULACIÓ)'}",
             ]
             ready_for_live = hl_ok and okx_connected and has_hl_funds and has_okx_funds
