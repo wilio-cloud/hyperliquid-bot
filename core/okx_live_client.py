@@ -209,7 +209,14 @@ class OkxLiveClient:
                 if c in ("USDT", "USDC"):
                     avail_bal += avail
                     total_equity += eq
-        return {"available": avail_bal, "total": total_equity, "currencies": currencies, "raw": res.get("data")}
+        return {
+            "available": avail_bal,
+            "total": total_equity,
+            "currencies": currencies,
+            "code": res.get("code"),
+            "msg": res.get("msg"),
+            "raw": res.get("data"),
+        }
 
     async def get_funding_balance(self, ccy: Optional[str] = None) -> Dict[str, Any]:
         """Consulta el balanç del compte de finançament (Funding Account / Dipòsits) a OKX."""
@@ -225,7 +232,13 @@ class OkxLiveClient:
                 currencies[c] = {"available": avail, "balance": bal}
                 if c in ("USDT", "USDC"):
                     total_usd += bal
-        return {"total_usd": total_usd, "currencies": currencies, "raw": res.get("data")}
+        return {
+            "total_usd": total_usd,
+            "currencies": currencies,
+            "code": res.get("code"),
+            "msg": res.get("msg"),
+            "raw": res.get("data"),
+        }
 
     async def get_positions(self) -> List[Dict[str, Any]]:
         """Consulta les posicions perpètues obertes a OKX."""

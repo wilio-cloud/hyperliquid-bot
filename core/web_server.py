@@ -1218,8 +1218,12 @@ class WebDashboardServer:
                         real_bal = await okx_real.get_account_balance()
                         real_fund = await okx_real.get_funding_balance()
                         real_check = {
+                            "real_trading_code": real_bal.get("code"),
+                            "real_trading_msg": real_bal.get("msg"),
                             "real_trading_total": round(real_bal.get("total", 0.0), 2),
                             "real_trading_currencies": real_bal.get("currencies", {}),
+                            "real_funding_code": real_fund.get("code"),
+                            "real_funding_msg": real_fund.get("msg"),
                             "real_funding_total": round(real_fund.get("total_usd", 0.0), 2),
                             "real_funding_currencies": real_fund.get("currencies", {}),
                         }
@@ -1228,6 +1232,8 @@ class WebDashboardServer:
 
                 diag["okx"] = {
                     "status": "CONNECTED",
+                    "api_response_code": bal_data.get("code"),
+                    "api_response_msg": bal_data.get("msg"),
                     "total_equity_usd": round(bal_data.get("total", 0.0), 2),
                     "available_balance_usd": round(bal_data.get("available", 0.0), 2),
                     "trading_currencies": bal_data.get("currencies", {}),
