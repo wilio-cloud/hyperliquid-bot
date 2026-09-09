@@ -1271,13 +1271,37 @@ class WebDashboardServer:
                                 if oid:
                                     await client._request("POST", "/api/v5/trade/cancel-order", data={"instId": near_inst, "ordId": oid})
 
+                            # Provar funding rate i ticker del contracte X-Perp
+                            fr_res = await client._request("GET", "/api/v5/public/funding-rate-current", params={"instId": near_inst})
+                            ticker_res = await client._request("GET", "/api/v5/market/ticker", params={"instId": near_inst})
+
+                            # Mapa de monedes suportades amb X-Perp
+                            bot_coins = ["BTC", "ETH", "SOL", "AVAX", "LINK", "NEAR", "SUI", "DOGE", "ARB", "OP", "APT", "SEI", "INJ", "UNI"]
+                            mapped_coins = {}
+                            for c in bot_coins:
+                                matches = [i for i in fut_data if i.get("instId", "").startswith(f"{c}-USD_UM_XPERP")]
+                                if matches:
+                                    m = matches[0]
+                                    mapped_coins[c] = {
+                                        "instId": m.get("instId"),
+                                        "ctVal": m.get("ctVal"),
+                                        "ctValCcy": m.get("ctValCcy"),
+                                        "tickSz": m.get("tickSz"),
+                                        "lotSz": m.get("lotSz"),
+                                        "minSz": m.get("minSz"),
+                                        "settleCcy": m.get("settleCcy"),
+                                        "expTime": m.get("expTime"),
+                                    }
+
                             probe_tests = {
                                 "all_positions_count": len(all_pos_data),
                                 "sample_positions": [{"instId": p.get("instId"), "pos": p.get("pos"), "mgnMode": p.get("mgnMode")} for p in all_pos_data[:5]],
                                 "near_xperp_inst": near_inst,
                                 "test_xperp_res": test_xperp,
+                                "fr_res": fr_res,
+                                "ticker_res": ticker_res,
                                 "total_xperps_count": len(all_xperps),
-                                "sample_xperps": all_xperps[:10],
+                                "mapped_coins": mapped_coins,
                             }
                             probe_ord = probe_tests
 
