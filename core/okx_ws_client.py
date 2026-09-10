@@ -320,20 +320,25 @@ class OkxWSClient:
                     inst_id = self.symbol_map.get(coin)
                     if not inst_id:
                         continue
-                    if "-SWAP" not in inst_id:
-                        self.funding_rates_8h[coin] = 0.0
-                        continue
-                    full_url = f"{url}?instId={inst_id}"
-                    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self._ssl_context)) as session:
-                        async with session.get(full_url, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
-                            if resp.status == 200:
-                                res_json = await resp.json()
-                                d = res_json.get("data", [])
-                                if d:
-                                    fr_str = d[0].get("fundingRate")
-                                    if fr_str:
-                                        self.funding_rates_8h[coin] = float(fr_str) * 100.0
-                    await asyncio.sleep(0.5)
+                    # Per a XPERP (EEA), l'endpoint funding-rate-current no existeix.
+                    # Usem l'instrument SWAP equivalent per obtenir la taxa de funding.
+                    if "-SWAP" in inst_id:
+                        query_inst_id = inst_id
+                    else:
+                        query_inst_id = f"{coin.upper()}-USDT-SWAP"
+                    full_url = f"{url}?instId={query_inst_id}"
+                    try:
+                        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self._ssl_context)) as session:
+                            async with session.get(full_url, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
+                                if resp.status == 200:
+                                    res_json = await resp.json()
+                                    d = res_json.get("data", [])
+                                    if d:
+                                        fr_str = d[0].get("fundingRate")
+                                        if fr_str:
+                                            self.funding_rates_8h[coin] = float(fr_str) * 100.0
+                    except Exception as e:
+                        logger.debug(f"Error polling funding rate per {coin} ({query_inst_id}): {e}")
 
                 if self.funding_rates_8h and self.on_funding_update:
                     self.on_funding_update(self.funding_rates_8h)

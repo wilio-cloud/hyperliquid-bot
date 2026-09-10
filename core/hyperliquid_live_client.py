@@ -179,12 +179,10 @@ class HyperliquidLiveClient:
             except Exception as e:
                 logger.debug(f"No s'ha pogut consultar spot state a Hyperliquid: {e}")
 
-            # En comptes Unified, spot_usdc ja conté la totalitat del capital (inclòs el marge 'hold').
-            # Només si spot_usdc és 0 utilitzem account_value o withdrawable del clearinghouse de perps.
-            if spot_usdc > 0:
-                total_bal = spot_usdc
-            else:
-                total_bal = max(account_value, withdrawable)
+            # account_value inclou el marge i PnL no realitzat del clearinghouse de Perps.
+            # Per a trading de Perps, account_value és la mètrica principal.
+            # spot_usdc és USDC al Spot clearinghouse (separat de Perps).
+            total_bal = account_value if account_value > 0 else max(spot_usdc, withdrawable)
 
             logger.info(
                 f"Balanç Hyperliquid obtingut: Perps={account_value:.2f}$, "
@@ -238,12 +236,9 @@ class HyperliquidLiveClient:
         if rounded_sz <= 0:
             return {"status": "err", "error": f"Mida invàlida per a {coin}: {size}"}
 
-        # Collar de seguretat de 0.25% per a ordres IOC per assegurar fill immediat al millor preu
-        if ioc:
-            collar_px = target_price * (1.0025 if is_buy else 0.9975)
-            rounded_px = self.round_price(hl_coin, collar_px)
-        else:
-            rounded_px = self.round_price(hl_coin, target_price)
+        # El collar IOC es gestiona al caller (ArbitrageLiveExchange).
+        # No apliquem doble collar aquí per evitar 0.50% de slippage acumulat.
+        rounded_px = self.round_price(hl_coin, target_price)
 
         tif = "Alo" if post_only else ("Ioc" if ioc else "Gtc")
         order_type = {"limit": {"tif": tif}}

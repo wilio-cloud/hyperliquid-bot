@@ -256,8 +256,13 @@ class ArbitrageTradingBotApp:
         self.carry_strategy = FundingCarryStrategy(
             min_entry_apr=self.min_carry_apr,
             min_exit_apr=self.min_exit_apr,
+            min_entry_spread_pct=-0.030,         # Permetre petit cost de base a l'entrada
+            windfall_take_profit_pct=0.60,        # TP per guany de base extraordinari
+            max_basis_divergence_pct=2.00,        # SL per divergència de base
+            divergence_min_duration_sec=180.0,    # 3 min sostingut
+            min_holding_hours=1.0,                # Mínim 1h abans de tancar per compressió
             max_book_spread_pct=max_book_spread,
-            maker_first=self.maker_first,
+            maker_first=True,                     # SEMPRE Maker a HL per carry
         )
         self.hl_ws = HyperliquidWSClient(
             coins=self.coins,
@@ -332,15 +337,17 @@ class ArbitrageTradingBotApp:
             )
 
     def _on_pair_close(self, pos: ArbitragePosition, exit_reason: str, net_pnl: float):
-        # Pausa de seguretat de 90 segons (1.5 minuts) per permetre flux sostingut de 8-10 op/h
-        self.coin_cooldowns[pos.coin] = time.time() + 90.0
+        # Cooldown adaptatiu: 1 hora per carry (evitar re-entrades en funding comprimit), 90s per scalp
+        cooldown_sec = 3600.0 if getattr(pos, "strategy_type", "SPREAD_SCALP") == "FUNDING_CARRY" else 90.0
+        self.coin_cooldowns[pos.coin] = time.time() + cooldown_sec
         if self.headless:
             icon = "✅" if net_pnl > 0 else "❌"
             res_str = "GUANY" if net_pnl > 0 else "PÈRDUA"
+            cd_label = f"{cooldown_sec/60:.0f}min"
             print(
                 f"  {icon} [ARB TANCAT {exit_reason}] {pos.coin} | {res_str}: {net_pnl:+.3f}$ | "
                 f"Funding: {pos.accumulated_funding:+.4f}$ | Comissions: {pos.total_fees:.4f}$ | "
-                f"Balanç Total: {self.exchange.total_balance_usd:.2f}$ (Cooldown 90s)"
+                f"Balanç Total: {self.exchange.total_balance_usd:.2f}$ (Cooldown {cd_label})"
             )
 
     def handle_hl_book(self, book: OrderBookL2):
@@ -400,7 +407,9 @@ class ArbitrageTradingBotApp:
 
             if sig:
                 order_sz = self.calculate_order_size()
-                self.exchange.open_arbitrage_position(sig, size_usd=order_sz, is_maker=False)
+                # Per carry, forçar Maker entry per minimitzar comissions
+                use_maker = sig.strategy_type == "FUNDING_CARRY"
+                self.exchange.open_arbitrage_position(sig, size_usd=order_sz, is_maker=use_maker)
 
     async def _run_hl_meta_sync_loop(self):
         """Sincronitza Funding Rates oficials de Hyperliquid cada 30 segons."""
@@ -943,10 +952,11 @@ def main():
     max_size_default = float(env_max_sz) if (env_max_sz and float(env_max_sz) > 50.0) else 2500.0
 
     parser = argparse.ArgumentParser(description="Bot d'Arbitratge Delta-Neutral i Scalping (Hyperliquid + Aevo / Vertex / dYdX / Binance)")
-    parser.add_argument("--mode", choices=["arbitrage", "funding_carry", "scalper"], default="arbitrage", help="Mode d'operació: 'arbitrage' (spread scalping), 'funding_carry' (carry trade passiu de funding), o 'scalper'")
+    mode_default = os.environ.get("BOT_MODE", "funding_carry")
+    parser.add_argument("--mode", choices=["arbitrage", "funding_carry", "scalper"], default=mode_default, help="Mode d'operació: 'arbitrage' (spread scalping), 'funding_carry' (carry trade passiu de funding), o 'scalper'")
     parser.add_argument("--venue2", choices=["aevo", "vertex", "dydx", "binance", "okx"], default=venue2_default, help="Segon exchange per a l'arbitratge: 'aevo', 'okx' (CEX institucional), 'vertex', 'dydx' o 'binance'")
     parser.add_argument("--coins", nargs="+", default=None, help="Monedes a operar (ex: BTC ETH SOL)")
-    parser.add_argument("--maker-first", action="store_true", default=os.getenv("MAKER_FIRST", "false").lower() in ("true", "1", "yes"), help="Activar execució Maker-First a Hyperliquid per minimitzar comissions d'arbitratge")
+    parser.add_argument("--maker-first", action="store_true", default=os.getenv("MAKER_FIRST", "true").lower() in ("true", "1", "yes"), help="Activar execució Maker-First a Hyperliquid per minimitzar comissions d'arbitratge")
     parser.add_argument("--initial-balance", type=float, default=initial_balance_default, help="Capital inicial total en dòlars (default: 1000.0$)")
     parser.add_argument("--leverage", type=float, default=leverage_default, help="Apalancament conservador per a l'arbitratge (default: 3.0x)")
     parser.add_argument("--size", type=float, default=size_default, help="Mida en dòlars per ordre/pota (default: 150.0$)")
@@ -961,10 +971,10 @@ def main():
     parser.add_argument("--exit-spread", type=float, default=exit_spread_default, help="Spread màxim percentual de sortida/convergència (default: 0.010%%)")
     parser.add_argument("--max-positions", type=int, default=max_positions_default, help="Nombre màxim de posicions simultànies (default: 4)")
     parser.add_argument("--max-book-spread", type=float, default=None, help="Spread intern màxim del llibre de l'exchange per admetre entrada (default: 0.500%% per a dYdX, 0.220%% per a Aevo/altres)")
-    parser.add_argument("--min-carry-apr", type=float, default=float(os.environ.get("MIN_CARRY_APR", "16.0")), help="APR mínim per entrar en Funding Carry Trade (default: 16.0%%)")
-    parser.add_argument("--min-exit-apr", type=float, default=float(os.environ.get("MIN_EXIT_APR", "4.0")), help="APR mínim per sortir de Funding Carry per compressió (default: 4.0%%)")
+    parser.add_argument("--min-carry-apr", type=float, default=float(os.environ.get("MIN_CARRY_APR", "18.0")), help="APR mínim per entrar en Funding Carry Trade (default: 18.0%%)")
+    parser.add_argument("--min-exit-apr", type=float, default=float(os.environ.get("MIN_EXIT_APR", "3.0")), help="APR mínim per sortir de Funding Carry per compressió (default: 3.0%%)")
     parser.add_argument("--enable-carry", action="store_true", default=os.getenv("ENABLE_CARRY", "false").lower() in ("true", "1", "yes"), help="Habilitar entrades híbrides de Funding Carry dins el mode d'arbitratge")
-    parser.add_argument("--carry-slots", type=int, default=int(os.environ.get("CARRY_SLOTS", "2")), help="Ranures màximes reservades per a carry trade en mode híbrid (default: 2)")
+    parser.add_argument("--carry-slots", type=int, default=int(os.environ.get("CARRY_SLOTS", "3")), help="Ranures màximes reservades per a carry trade en mode híbrid (default: 3)")
     parser.add_argument("--duration", type=int, default=0, help="Durada màxima d'execució en segons (0 = indefinit)")
     parser.add_argument("--headless", action="store_true", help="Executar sense el tauler visual Rich de terminal (recomanat per a Docker/Railway)")
     parser.add_argument("--live", action="store_true", help="Activar mode d'execució en real a Hyperliquid i Aevo")

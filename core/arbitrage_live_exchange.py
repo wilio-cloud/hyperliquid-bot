@@ -286,9 +286,11 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             else:
                 self.bn_avail_usd = self.bn_balance_usd
 
-            # Si encara no s'ha tancat cap posició, el balanç de referència és l'equity real inicial (evitant salts per marge bloquejat)
-            if not self.closed_positions:
+            # Només inicialitzem el balanç de referència UN COP (cold boot).
+            # Evitem el reset continu que destruïa la baseline d'equity.
+            if not self.closed_positions and not getattr(self, "_initial_balance_set", False):
                 self.initial_total_balance = self.total_balance_usd + getattr(self, "total_fees_paid", 0.0)
+                self._initial_balance_set = True
 
             logger.info(
                 f"Saldos reals sincronitzats: Hyperliquid = {self.hl_balance_usd:.2f}$ | "
@@ -433,8 +435,13 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                     else:
                         curr_exec_spread = ((bn_book.best_bid - hl_book.best_ask) / mid) * 100.0
                     
-                    # Amb Maker-First el hurdle rate pot ser de 0.09% en comptes de 0.20%
-                    min_allowed = 0.080 if effective_maker_first else 0.200
+                    # Per a carry trades, el spread de preus és secundari (entrem per funding APR).
+                    # Només requerim que la base no sigui massa adversa (>= -0.05%).
+                    is_carry = getattr(signal, "strategy_type", "SPREAD_SCALP") == "FUNDING_CARRY"
+                    if is_carry:
+                        min_allowed = -0.050
+                    else:
+                        min_allowed = 0.080 if effective_maker_first else 0.200
                     if curr_exec_spread < min_allowed:
                         logger.warning(
                             f"⚠️ [PRE-FLIGHT REBUTJAT] Spread per a {coin} s'ha reduït a {curr_exec_spread:.3f}% "
@@ -540,35 +547,12 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                         except Exception as se:
                             logger.debug(f"Error verificant estat post-cancel·lació per {coin}: {se}")
 
-                        # ⚡ FALLBACK TAKER IOC: Si no s'ha omplert com a Maker en 3s,
-                        # comprovem si l'spread actual encara cobreix comissions Taker (>= 0.160%).
-                        # Si és així, executem immediatament com a Taker per assegurar l'obertura de l'operació!
+                        # Taker Fallback ELIMINAT: era la causa principal de pèrdues.
+                        # Quan l'ordre Maker no s'omple en el timeout, cancel·lem a cost $0.
+                        # No executem MAI com a Taker agressiu — la fricció (0.26%+) supera
+                        # qualsevol spread observable entre exchanges.
                         if not hl_ok:
-                            latest_hl = self._last_hl_books.get(coin)
-                            latest_bn = self._last_bn_books.get(coin)
-                            if latest_hl and latest_bn and latest_hl.best_bid and latest_hl.best_ask and latest_bn.best_bid and latest_bn.best_ask:
-                                cur_hl_px = latest_hl.best_ask if hl_is_buy else latest_hl.best_bid
-                                cur_bn_px = latest_bn.best_bid if hl_is_buy else latest_bn.best_ask
-                                cur_mid = (cur_hl_px + cur_bn_px) / 2.0
-                                cur_spr = ((cur_bn_px - cur_hl_px) / cur_mid * 100.0) if hl_is_buy else ((cur_hl_px - cur_bn_px) / cur_mid * 100.0)
-                                if cur_spr >= 0.160:
-                                    logger.info(f"⚡ [TAKER FALLBACK] Oportunitat viva a {coin} (Spread {cur_spr:.3f}% >= 0.160%). Executant com a Taker IOC...")
-                                    try:
-                                        agg_taker_px = cur_hl_px * (1.0025 if hl_is_buy else 0.9975)
-                                        fb_res = await self.hl_client.place_order(
-                                            coin=coin,
-                                            is_buy=hl_is_buy,
-                                            size=hl_sz,
-                                            price=agg_taker_px,
-                                            post_only=False,
-                                            ioc=True,
-                                        )
-                                        if isinstance(fb_res, dict) and fb_res.get("status") == "ok":
-                                            hl_ok = True
-                                            hl_fill_type = "TAKER_FALLBACK"
-                                            logger.info(f"✅ Taker Fallback {coin} executat amb èxit!")
-                                    except Exception as fbe:
-                                        logger.debug(f"Error en Taker fallback {coin}: {fbe}")
+                            logger.info(f"⏹️ [MAKER NO OMPLERT] {coin}: ordre Maker no omplerta dins del timeout. Cancel·lat a cost $0.")
 
             # Si Hyperliquid no s'omple o falla, avortem immediatament sense tocar Aevo (0 risc, 0 exposició)
             if not hl_ok:
@@ -612,10 +596,15 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                 # Extreure preus reals d'execució d'entrada retornats per les APIs
                 actual_hl_entry_px = signal.hl_price
                 effective_hl_res = fb_res if hl_fill_type == "TAKER_FALLBACK" else hl_res
-                if isinstance(effective_hl_res, dict) and "filled" in effective_hl_res:
+                # Fix: HL client retorna "fill" (no "filled"). Acceptem ambdues claus per robustesa.
+                fill_data = None
+                if isinstance(effective_hl_res, dict):
+                    fill_data = effective_hl_res.get("fill") or effective_hl_res.get("filled")
+                if fill_data and isinstance(fill_data, dict):
                     try:
-                        actual_hl_entry_px = float(effective_hl_res["filled"].get("avgPx", signal.hl_price))
-                    except Exception:
+                        actual_hl_entry_px = float(fill_data.get("avgPx", signal.hl_price))
+                        logger.info(f"📊 Preu real d'entrada HL per {coin}: {actual_hl_entry_px} (vs senyal: {signal.hl_price})")
+                    except (ValueError, TypeError):
                         pass
 
                 actual_bn_entry_px = signal.bn_price
@@ -797,10 +786,15 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
             # Extreure preus reals d'execució retornats per les APIs
             actual_hl_exit_px = hl_exit_price
-            if isinstance(hl_res, dict) and "filled" in hl_res:
+            # Fix: HL client retorna "fill" (no "filled"). Acceptem ambdues claus per robustesa.
+            fill_data = None
+            if isinstance(hl_res, dict):
+                fill_data = hl_res.get("fill") or hl_res.get("filled")
+            if fill_data and isinstance(fill_data, dict):
                 try:
-                    actual_hl_exit_px = float(hl_res["filled"].get("avgPx", hl_exit_price))
-                except Exception:
+                    actual_hl_exit_px = float(fill_data.get("avgPx", hl_exit_price))
+                    logger.info(f"📊 Preu real de sortida HL per {coin}: {actual_hl_exit_px} (vs teòric: {hl_exit_price})")
+                except (ValueError, TypeError):
                     pass
 
             actual_bn_exit_px = bn_exit_price
@@ -902,6 +896,13 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             results["status"] = "err"
             results["error"] = str(e)
         return results
+
+    @property
+    def net_pnl(self) -> float:
+        """En mode live, les API dels brokers (HL accountValue, OKX equity)
+        ja inclouen l'unrealized PnL dins l'equity del compte.
+        No cal sumar total_unrealized_pnl de nou (evitem double-counting)."""
+        return self.total_balance_usd - self.initial_total_balance
 
     @property
     def metrics(self) -> dict:
