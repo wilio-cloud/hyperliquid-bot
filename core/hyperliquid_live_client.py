@@ -179,10 +179,14 @@ class HyperliquidLiveClient:
             except Exception as e:
                 logger.debug(f"No s'ha pogut consultar spot state a Hyperliquid: {e}")
 
-            # account_value inclou el marge i PnL no realitzat del clearinghouse de Perps.
-            # Per a trading de Perps, account_value és la mètrica principal.
-            # spot_usdc és USDC al Spot clearinghouse (separat de Perps).
-            total_bal = account_value if account_value > 0 else max(spot_usdc, withdrawable)
+            # A Hyperliquid, account_value (Perps clearinghouse) i spot_usdc (Spot clearinghouse)
+            # són pools SEPARATS. Cal sumar-los per obtenir el total real.
+            # - account_value: marge + PnL no realitzat al clearinghouse de Perps
+            # - spot_usdc: USDC disponible al clearinghouse de Spot
+            # Quan no hi ha posicions obertes, quasi tot el USDC està al Spot.
+            total_bal = account_value + spot_usdc
+            if total_bal <= 0:
+                total_bal = max(withdrawable, 0.0)
 
             logger.info(
                 f"Balanç Hyperliquid obtingut: Perps={account_value:.2f}$, "
