@@ -194,6 +194,15 @@ class OkxLiveClient:
             return self.contract_specs[c]["instId"]
         return f"{c}-USDT-SWAP"
 
+    def is_tradeable(self, coin: str) -> bool:
+        """Comprova si una moneda és operable a OKX amb l'API Key actual.
+        En mode EEA, només les monedes amb instrument XPERP són operables."""
+        is_eea = ("eea.okx.com" in self.base_url) or (os.environ.get("OKX_REGION", "eea").lower() == "eea")
+        if not is_eea:
+            return True  # En mode global, totes les SWAP són operables
+        inst_id = self.get_inst_id(coin)
+        return "XPERP" in inst_id
+
     async def init_contract_specs(self):
         """Descarrega les especificacions de cada contracte (ctVal, tickSz) i la configuració del compte des d'OKX."""
         if self._specs_initialized:
@@ -438,6 +447,17 @@ class OkxLiveClient:
         await self.init_contract_specs()
         inst_id = self.get_inst_id(coin)
         side = "buy" if is_buy else "sell"
+
+        # En mode EEA, l'API Key NOMÉS pot operar instruments XPERP.
+        # Si l'instrument resolt és SWAP (no XPERP), rebutjar per evitar
+        # obrir posicions a HL que no es poden cobrir a OKX.
+        is_eea = ("eea.okx.com" in self.base_url) or (os.environ.get("OKX_REGION", "eea").lower() == "eea")
+        if is_eea and "XPERP" not in inst_id:
+            logger.warning(
+                f"⛔ [EEA GUARD] {coin} no disponible com a XPERP ({inst_id}). "
+                f"En mode EEA, només es poden operar instruments XPERP. Ordre rebutjada."
+            )
+            return {"status": "err", "code": "EEA_NO_XPERP", "error": f"{coin} not available as XPERP in EEA mode"}
 
         if post_only:
             ord_type = "post_only"

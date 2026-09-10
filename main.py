@@ -392,6 +392,10 @@ class ArbitrageTradingBotApp:
 
         # 3. Avalua noves oportunitats d'entrada si no tenim posició en aquest parell
         if not self.exchange.has_open_position(coin) and len(self.exchange.active_positions) < self.max_positions:
+            # Filtre EEA: saltar monedes sense instrument XPERP a OKX
+            if hasattr(self.exchange, 'aevo_client') and hasattr(self.exchange.aevo_client, 'is_tradeable'):
+                if not self.exchange.aevo_client.is_tradeable(coin):
+                    return
             sig = None
             if self.strategy_mode == "funding_carry":
                 sig = self.carry_strategy.evaluate_entry(coin)
