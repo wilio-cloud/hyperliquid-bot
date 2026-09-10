@@ -243,7 +243,9 @@ class OkxWSClient:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.warning(f"Desconnexió OKX WebSocket ({e}). Reintentant en {retry_delay:.1f}s...")
+                # C6 FIX: Buidar orderbooks per evitar trades amb preus congelats
+                logger.warning(f"Desconnexió OKX WebSocket ({e}). Invalidant orderbooks i reintentant en {retry_delay:.1f}s...")
+                self.order_books.clear()
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 1.5, 30.0)
 

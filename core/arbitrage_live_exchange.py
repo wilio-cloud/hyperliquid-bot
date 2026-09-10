@@ -81,6 +81,14 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             aevo_pos_task = asyncio.create_task(self.aevo_client.get_positions())
             hl_state, aevo_positions = await asyncio.gather(hl_state_task, aevo_pos_task, return_exceptions=True)
 
+            # C2 FIX: Si qualsevol API falla, avortar reconciliació per evitar liquidació massiva
+            if isinstance(hl_state, Exception):
+                logger.warning(f"⚠️ [RECONCILE] API Hyperliquid ha fallat ({hl_state}). Avortant reconciliació per seguretat.")
+                return
+            if isinstance(aevo_positions, Exception):
+                logger.warning(f"⚠️ [RECONCILE] API {self.venue2_name} ha fallat ({aevo_positions}). Avortant reconciliació per seguretat.")
+                return
+
             hl_positions_map = {}
             if isinstance(hl_state, dict):
                 for p in hl_state.get("assetPositions", []):
@@ -112,9 +120,19 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             # Reconciliem cada moneda que tingui posicions obertes als brokers
             existing_active_coins = {p.coin.upper(): pair_id for pair_id, p in self.active_positions.items()}
 
+            # C3 FIX: Obtenir coins amb tancament pendent per evitar double-close
+            pending_close_coins = set()
+            for pair_id in self._pending_closes:
+                pos = self.active_positions.get(pair_id)
+                if pos:
+                    pending_close_coins.add(pos.coin.upper())
+
             for coin in list(self._open_broker_coins):
                 if coin in self._pending_opens:
                     logger.debug(f"Reconciliació: {coin} té una ordre d'obertura en curs. Ometent temporalment.")
+                    continue
+                if coin in pending_close_coins:
+                    logger.debug(f"Reconciliació: {coin} té un tancament en curs. Ometent temporalment.")
                     continue
 
                 hl_pos = hl_positions_map.get(coin)
@@ -374,6 +392,10 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
         coin = signal.coin
         pair_id = f"ARB_{coin}_LIVE_{int(time.time() * 1000)}"
         try:
+            # L4 FIX: Protecció contra preus zero/negatius (glitch ticks)
+            if signal.hl_price <= 0 or signal.bn_price <= 0:
+                logger.warning(f"⚠️ [GUARD] Preus invàlids per {coin}: HL={signal.hl_price}, OKX={signal.bn_price}. Avortant obertura.")
+                return
             # Assegurar palanquejament 2x abans d'obrir si no s'ha configurat encara
             if coin not in self._configured_leverage_coins:
                 try:
@@ -836,6 +858,9 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
             if pair_id in self.active_positions:
                 del self.active_positions[pair_id]
             self.closed_positions.append(pos)
+            # H4 FIX: Limitar llista per evitar memory leak en bot 24/7
+            if len(self.closed_positions) > 200:
+                self.closed_positions = self.closed_positions[-200:]
 
             logger.info(
                 f"🎉 [ARB REAL TANCAT] {coin} {reason} | PnL Net Realitzat: {pos.realized_pnl:+.3f}$ "

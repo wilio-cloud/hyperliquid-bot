@@ -576,9 +576,21 @@ class OkxLiveClient:
         else:
             # Tancament parcial per Delta Rebalancer: ordre contrària agressiva IOC amb reduce_only=True
             close_is_buy = (current_side == "sell")
-            last_price = float(pos.get("avg_entry_price", 0.0))
+            # C1 FIX: Usar preu de mercat actual en lloc de avg_entry_price
+            # L'avg_entry_price no reflecteix el preu actual — si el mercat s'ha mogut,
+            # l'ordre IOC no s'omplirà mai perquè el preu límit és massa lluny del mercat.
+            try:
+                ticker_res = await self._request("GET", "/api/v5/market/ticker", params={"instId": inst_id})
+                if ticker_res.get("code") == "0" and ticker_res.get("data"):
+                    last_price = float(ticker_res["data"][0].get("last", 0.0))
+                else:
+                    last_price = float(pos.get("avg_entry_price", 0.0))
+            except Exception:
+                last_price = float(pos.get("avg_entry_price", 0.0))
+            if last_price <= 0:
+                last_price = float(pos.get("avg_entry_price", 0.0))
             aggr_px = last_price * 1.05 if close_is_buy else last_price * 0.95
-            logger.info(f"⚖️ Tancant parcialment a OKX: {coin} {size} (de {current_amount}) amb IOC reduce_only...")
+            logger.info(f"⚖️ Tancant parcialment a OKX: {coin} {size} (de {current_amount}) amb IOC reduce_only @ mkt {last_price}...")
             return await self.place_order(
                 coin=coin,
                 is_buy=close_is_buy,

@@ -392,9 +392,10 @@ class ArbitrageTradingBotApp:
 
         # 3. Avalua noves oportunitats d'entrada si no tenim posició en aquest parell
         if not self.exchange.has_open_position(coin) and len(self.exchange.active_positions) < self.max_positions:
-            # Filtre EEA: saltar monedes sense instrument XPERP a OKX
-            if hasattr(self.exchange, 'aevo_client') and hasattr(self.exchange.aevo_client, 'is_tradeable'):
-                if not self.exchange.aevo_client.is_tradeable(coin):
+            # Filtre EEA: saltar monedes sense instrument XPERP a OKX (H1 FIX: usar venue2_client)
+            v2 = getattr(self.exchange, 'venue2_client', None) or getattr(self.exchange, 'aevo_client', None)
+            if v2 and hasattr(v2, 'is_tradeable'):
+                if not v2.is_tradeable(coin):
                     return
             sig = None
             if self.strategy_mode == "funding_carry":
@@ -794,6 +795,17 @@ class ArbitrageTradingBotApp:
 
     async def shutdown(self):
         self.is_running = False
+        # C7 FIX: Guardar estat de posicions abans d'aturar per recovery al reinici
+        active_count = len(self.exchange.active_positions)
+        if active_count > 0:
+            logger.warning(
+                f"⚠️ [SHUTDOWN] {active_count} posicions delta-neutral queden OBERTES als exchanges. "
+                f"El bot les recuperarà automàticament al reiniciar via live_state.json."
+            )
+            for pid, pos in self.exchange.active_positions.items():
+                logger.warning(f"  📌 {pos.coin} {pos.direction} | HL: {pos.leg_hl.size} | OKX: {pos.leg_bn.size}")
+        self.exchange.save_state()
+        logger.info("💾 Estat guardat a live_state.json per recovery.")
         for t in (self._sync_task, self._funding_accrual_task, self._balance_sync_task):
             if t:
                 t.cancel()
