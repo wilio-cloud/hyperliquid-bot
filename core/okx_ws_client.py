@@ -313,7 +313,7 @@ class OkxWSClient:
 
     async def _run_funding_poll_loop(self):
         """Polling periòdic de fallback per a les taxes de finançament d'OKX."""
-        url = f"{self.rest_url}/api/v5/public/funding-rate-current"
+        url = f"{self.rest_url}/api/v5/public/funding-rate"
         while self.is_running:
             try:
                 for coin in self.coins:
