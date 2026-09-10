@@ -126,9 +126,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <div class="sub" id="winrate-sub">Winrate: -%</div>
             </div>
             <div class="card">
-                <div class="label">Ritme Horari</div>
+                <div class="label">APR Net Carry</div>
                 <div class="val" id="pace">-</div>
-                <div class="sub" id="pace-sub">Objectiu: 4-6 op/h</div>
+                <div class="sub" id="pace-sub">Objectiu: ≥18% APR net</div>
             </div>
             <div class="card">
                 <div class="label">Comissions</div>
@@ -796,27 +796,34 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 document.getElementById('trades').innerText = `${m.total_trades || 0} (${m.wins || 0}W / ${m.losses || 0}L)`;
                 document.getElementById('winrate-sub').innerText = `Winrate: ${fmtNum(m.winrate_pct, 1)}%`;
 
-                // Ritme horari (Trades/h)
+                // APR Net Carry (en comptes de Ritme Horari)
                 const paceEl = document.getElementById('pace');
+                const carryApr = (typeof m.net_carry_apr === 'number') ? m.net_carry_apr : 0.0;
                 const paceVal = (typeof m.trades_per_hour === 'number') ? m.trades_per_hour : 0.0;
                 if (paceEl) {
-                    paceEl.innerText = paceVal.toFixed(1) + ' op/h';
-                    if (paceVal >= 8.0) {
-                        paceEl.className = 'val green';
-                    } else if (paceVal >= 5.0) {
-                        paceEl.className = 'val yellow';
+                    if (data.positions && data.positions.length > 0) {
+                        paceEl.innerText = carryApr.toFixed(1) + '% APR';
+                        if (carryApr >= 18.0) {
+                            paceEl.className = 'val green';
+                        } else if (carryApr >= 8.0) {
+                            paceEl.className = 'val yellow';
+                        } else {
+                            paceEl.className = 'val';
+                        }
                     } else {
+                        paceEl.innerText = 'Sense posicions';
                         paceEl.className = 'val';
                     }
                 }
                 const paceSub = document.getElementById('pace-sub');
                 if (paceSub) {
-                    paceSub.innerText = `Objectiu: ${m.target_trades_per_hour || '4-6'} op/h`;
+                    const dailyEst = (m.balance || 0) * carryApr / 100.0 / 365.0;
+                    paceSub.innerText = `~${dailyEst.toFixed(2)}$/dia | ${paceVal.toFixed(1)} op/h`;
                 }
                 const paceSumm = document.getElementById('pace-summary');
                 if (paceSumm) {
-                    const paceColor = paceVal >= 4.0 ? '#10b981' : (paceVal >= 2.0 ? '#facc15' : '#94a3b8');
-                    paceSumm.innerHTML = `Ritme actual: <b style="color: ${paceColor};">${paceVal.toFixed(1)} op/h</b> (Objectiu: ${m.target_trades_per_hour || '4-6'} op/h)`;
+                    const aprColor = carryApr >= 18.0 ? '#10b981' : (carryApr >= 8.0 ? '#facc15' : '#94a3b8');
+                    paceSumm.innerHTML = `APR Carry: <b style="color: ${aprColor};">${carryApr.toFixed(1)}%</b> (Objectiu: ≥18% APR)`;
                 }
 
                 document.getElementById('fees').innerText = fmtNum(m.total_fees, 4) + ' $';
@@ -1080,6 +1087,21 @@ class WebDashboardServer:
                     }
                     for p in self.exchange.closed_positions[-35:]
                 ]
+
+        # Calcular APR net ponderat de les posicions de carry actives
+        net_carry_apr = 0.0
+        if positions_data:
+            total_notional = 0.0
+            weighted_apr = 0.0
+            for p in positions_data:
+                notional = p.get("leg_hl", {}).get("size_usd", 0.0) + p.get("leg_bn", {}).get("size_usd", 0.0)
+                apr = p.get("current_net_apr", 0.0)
+                weighted_apr += apr * notional
+                total_notional += notional
+            if total_notional > 0:
+                net_carry_apr = weighted_apr / total_notional
+        metrics["net_carry_apr"] = round(net_carry_apr, 2)
+        metrics["strategy_mode"] = getattr(self.app_ref, "strategy_mode", "arbitrage") if self.app_ref else "arbitrage"
 
         return web.json_response({
             "uptime": uptime,
