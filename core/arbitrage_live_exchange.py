@@ -471,10 +471,19 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
 
             # Determinació del preu d'execució:
             # - En mode Maker (Post-Only): Comprem al BID i venem a l'ASK per descansar al llibre com a Maker (sense creuar).
+            #   Afegim 1 tick de marge per evitar rebuig "would have immediately matched".
             # - En mode Taker (IOC): Comprem a l'ASK i venem al BID per omplir immediatament.
             hl_book = self._last_hl_books.get(coin)
             if use_post_only and hl_book and hl_book.best_bid and hl_book.best_ask:
-                hl_order_price = hl_book.best_bid if hl_is_buy else hl_book.best_ask
+                # Per evitar "Post only order would have immediately matched":
+                # SELL: posar 1 tick per sobre del best_ask actual (no creuem el bid)
+                # BUY: posar 1 tick per sota del best_bid actual (no creuem l'ask)
+                tick_size = (hl_book.best_ask - hl_book.best_bid) * 0.01  # ~1% del spread com a tick buffer
+                tick_size = max(tick_size, hl_book.best_bid * 0.00001)    # mínim 0.001%
+                if hl_is_buy:
+                    hl_order_price = hl_book.best_bid - tick_size
+                else:
+                    hl_order_price = hl_book.best_ask + tick_size
             else:
                 hl_order_price = signal.hl_price
 
@@ -503,10 +512,13 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                     hl_ok = True
                     hl_fill_type = "MAKER" if use_post_only else "TAKER"
                 elif hl_res.get("status") == "resting" or (use_post_only and hl_res.get("status") == "ok"):
-                    # L'ordre Maker està al llibre. Esperem fins a 3 segons que s'ompli passivament
+                    # L'ordre Maker està al llibre. Per carry, esperem fins a 15s; per scalp, 3s.
+                    is_carry_trade = getattr(signal, "strategy_type", "SPREAD_SCALP") == "FUNDING_CARRY"
+                    max_wait_iters = 30 if is_carry_trade else 6  # 30×0.5s=15s, 6×0.5s=3s
+                    wait_label = "15s" if is_carry_trade else "3s"
                     oid = hl_res.get("oid")
-                    logger.info(f"Ordre Maker {coin} descansant al llibre (OID {oid}). Esperant execució passiva (3s max)...")
-                    for _ in range(6):
+                    logger.info(f"Ordre Maker {coin} descansant al llibre (OID {oid}). Esperant execució passiva ({wait_label} max)...")
+                    for _ in range(max_wait_iters):
                         await asyncio.sleep(0.5)
                         try:
                             st = await self.hl_client.get_account_state()
