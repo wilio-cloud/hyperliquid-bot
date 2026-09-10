@@ -137,82 +137,68 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
         </div>
 
-        <!-- Gràfica de Simulació d'Escenaris i Equitat en Viu -->
+        <!-- Gràfica de Projecció Composta Funding Carry -->
         <div class="card-chart">
             <div class="chart-header">
                 <div>
                     <h2 style="font-size: 1.05rem; color: #38bdf8; display: flex; align-items: center; gap: 8px;">
-                        📈 Trajectòria d'Equitat en Viu i Simulador de Creixement
+                        📈 Projecció de Creixement Compost — Funding Carry
                     </h2>
                     <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 3px;">
-                        Model compost a 25% de capital per ordre • Llindars reals ≥0.28% • Marge net: +0.22$ a +0.45$/trade (6 parells elit)
+                        Model compost mensual • Delta-neutral • Reinversió automàtica
                     </div>
                 </div>
-                <div id="ny-session-badge" class="ny-badge ny-pre">
-                    🔔 Pre-Market NY: Obertura en --m
+                <div id="live-apr-badge" style="background: rgba(16,185,129,0.15); color: #34d399; padding: 4px 12px; border-radius: 6px; font-size: 0.82rem; font-weight: 600;">
+                    ⚡ APR en viu: ---%
                 </div>
             </div>
 
-            <!-- Controls d'Horitzó i Toggles de Corbes -->
+            <!-- Controls d'Horitzó -->
             <div class="chart-controls">
                 <div class="btn-group" id="horizon-selector">
-                    <button class="btn-horizon active" onclick="setHorizon(24)">24 Hores (1D)</button>
-                    <button class="btn-horizon" onclick="setHorizon(72)">3 Dies</button>
-                    <button class="btn-horizon" onclick="setHorizon(168)">7 Dies (1S)</button>
-                    <button class="btn-horizon" onclick="setHorizon(720)">30 Dies (1M)</button>
+                    <button class="btn-horizon active" onclick="setHorizon(12)">1 Any</button>
+                    <button class="btn-horizon" onclick="setHorizon(60)">5 Anys</button>
+                    <button class="btn-horizon" onclick="setHorizon(120)">10 Anys</button>
                 </div>
                 <div class="toggles-group">
-                    <span class="toggle-chip chip-real" id="chip-real" onclick="toggleCurve('real')">🟣 Equitat Real</span>
-                    <span class="toggle-chip chip-actual" id="chip-actual" onclick="toggleCurve('actual')">🟢 Ritme Actual (<span id="lbl-pace-act">4.0</span> op/h)</span>
-                    <span class="toggle-chip chip-target" id="chip-target" onclick="toggleCurve('target')">🔵 Objectiu (4.5 op/h)</span>
-                    <span class="toggle-chip chip-cons" id="chip-cons" onclick="toggleCurve('conservative')">🟡 Conservador (2.5 op/h)</span>
-                    <span class="toggle-chip chip-ny" id="chip-ny" onclick="toggleCurve('ny')">🟠 Volatilitat NY (7.5 op/h)</span>
-                    <span class="toggle-chip chip-custom" id="chip-custom" onclick="toggleCurve('custom')">⚪ Slider Personalitzat</span>
+                    <span class="toggle-chip" style="border-color: #c084fc; color: #c084fc;" id="chip-real" onclick="toggleCurve('real')">🟣 Equitat Real</span>
+                    <span class="toggle-chip" style="border-color: #10b981; color: #10b981;" id="chip-optimistic" onclick="toggleCurve('optimistic')">🟢 Optimista (30%)</span>
+                    <span class="toggle-chip" style="border-color: #38bdf8; color: #38bdf8;" id="chip-realistic" onclick="toggleCurve('realistic')">🔵 Realista (20%)</span>
+                    <span class="toggle-chip" style="border-color: #facc15; color: #facc15;" id="chip-conservative" onclick="toggleCurve('conservative')">🟡 Conservador (12%)</span>
+                    <span class="toggle-chip" style="border-color: #f97316; color: #f97316;" id="chip-realtime" onclick="toggleCurve('realtime')">🟠 Ritme Temps Real</span>
                 </div>
-            </div>
-
-            <!-- Slider Interactiu de Ritme -->
-            <div class="slider-container">
-                <span style="font-weight: 600; white-space: nowrap;">⚡ Simular Ritme:</span>
-                <input type="range" id="sim-slider" min="0.5" max="15" step="0.5" value="4.0" oninput="onSliderInput(this.value)">
-                <span id="slider-label" style="font-weight: bold; color: #38bdf8; min-width: 70px;">4.0 op/h</span>
-                <span id="slider-gain-est" style="font-weight: 600; color: #10b981; margin-left: auto;">...</span>
             </div>
 
             <!-- Canvas de Chart.js -->
-            <div style="position: relative; height: 320px; width: 100%;">
+            <div style="position: relative; height: 340px; width: 100%;">
                 <canvas id="growthChart"></canvas>
             </div>
 
-            <!-- Mini KPIs de Projecció -->
+            <!-- KPIs de Projecció -->
             <div class="kpi-row">
                 <div class="kpi-box">
-                    <div class="kpi-lbl">Balanç & PnL Real</div>
-                    <div class="kpi-val purple" id="kpi-real-bal">1,001.05 $</div>
-                    <div class="kpi-sub" id="kpi-real-sub">+1.05$ (100% winrate)</div>
+                    <div class="kpi-lbl">Capital Actual</div>
+                    <div class="kpi-val purple" id="kpi-real-bal">935 $</div>
+                    <div class="kpi-sub" id="kpi-real-sub">2 posicions actives</div>
                 </div>
                 <div class="kpi-box">
-                    <div class="kpi-lbl">Projecció 24 Hores</div>
-                    <div class="kpi-val green" id="kpi-24h-val">~1,023 $</div>
-                    <div class="kpi-sub" id="kpi-24h-sub">+2.2% ritme mesurat</div>
+                    <div class="kpi-lbl">Projecció 1 Any</div>
+                    <div class="kpi-val green" id="kpi-1y-val">~1,122 $</div>
+                    <div class="kpi-sub" id="kpi-1y-sub">+20% compost anual</div>
                 </div>
                 <div class="kpi-box">
-                    <div class="kpi-lbl">Projecció 7 Dies</div>
-                    <div class="kpi-val green" id="kpi-7d-val">~1,171 $</div>
-                    <div class="kpi-sub" id="kpi-7d-sub">+17.0% compost</div>
+                    <div class="kpi-lbl">Projecció 5 Anys</div>
+                    <div class="kpi-val green" id="kpi-5y-val">~2,328 $</div>
+                    <div class="kpi-sub" id="kpi-5y-sub">+149% acumulat</div>
                 </div>
                 <div class="kpi-box">
-                    <div class="kpi-lbl">Projecció 30 Dies</div>
-                    <div class="kpi-val green" id="kpi-30d-val">~1,960 $</div>
-                    <div class="kpi-sub" id="kpi-30d-sub">+95.9% compost mensual</div>
-                </div>
-                <div class="kpi-box">
-                    <div class="kpi-lbl">Sessió Wall St (NY)</div>
-                    <div class="kpi-val" style="color: #fb923c;" id="kpi-ny-val">Pre-Market</div>
-                    <div class="kpi-sub" id="kpi-ny-sub">Factor x1.40 oportunitats</div>
+                    <div class="kpi-lbl">Projecció 10 Anys</div>
+                    <div class="kpi-val" style="color: #fb923c;" id="kpi-10y-val">~5,789 $</div>
+                    <div class="kpi-sub" id="kpi-10y-sub">+519% compost</div>
                 </div>
             </div>
         </div>
+
 
         <!-- Taula 1: Monitor de Spreads en Viu -->
         <div class="card-table">
@@ -321,15 +307,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const fmtPct = (p) => (typeof p === 'number' && !isNaN(p)) ? (p >= 0 ? '+' : '') + p.toFixed(3) + '%' : '-';
 
         let chartInstance = null;
-        let currentHorizon = 24; // 24, 72, 168, 720 hores
-        let customSliderPace = 4.0;
+        let currentHorizon = 12; // 12, 60, 120 mesos
         let curveVisibility = {
             real: true,
-            actual: true,
-            target: true,
+            optimistic: true,
+            realistic: true,
             conservative: true,
-            ny: true,
-            custom: true
+            realtime: true
         };
         let cachedStatusData = null;
 
@@ -347,64 +331,56 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     labels: [],
                     datasets: [
                         {
-                            label: 'Equitat Real (En Viu)',
+                            label: 'Equitat Real',
                             data: [],
                             borderColor: '#c084fc',
-                            backgroundColor: 'rgba(192, 132, 252, 0.08)',
+                            backgroundColor: 'rgba(192, 132, 252, 0.1)',
                             fill: true,
                             borderWidth: 3,
-                            pointRadius: 3,
+                            pointRadius: 2,
                             pointHoverRadius: 5,
-                            tension: 0.1,
-                            spanGaps: false
+                            tension: 0.2,
+                            spanGaps: true
                         },
                         {
-                            label: 'Ritme Actual Mesurat',
+                            label: 'Optimista (30% anual)',
                             data: [],
                             borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.05)',
+                            fill: true,
                             borderWidth: 2.5,
-                            pointRadius: 2,
-                            tension: 0.2,
-                            spanGaps: false
+                            pointRadius: 0,
+                            tension: 0.3,
+                            borderDash: []
                         },
                         {
-                            label: 'Objectiu (4.5 op/h • +0.25$)',
+                            label: 'Realista (20% anual)',
                             data: [],
                             borderColor: '#38bdf8',
-                            borderWidth: 2,
-                            borderDash: [5, 5],
+                            borderWidth: 2.5,
                             pointRadius: 0,
-                            tension: 0.2,
-                            spanGaps: false
+                            tension: 0.3,
+                            borderDash: [6, 3]
                         },
                         {
-                            label: 'Conservador (2.5 op/h • +0.20$)',
+                            label: 'Conservador (12% anual)',
                             data: [],
                             borderColor: '#facc15',
                             borderWidth: 2,
-                            borderDash: [4, 4],
                             pointRadius: 0,
-                            tension: 0.2,
-                            spanGaps: false
+                            tension: 0.3,
+                            borderDash: [4, 4]
                         },
                         {
-                            label: 'Volatilitat NY (7.5 op/h • +0.30$)',
+                            label: 'Ritme Temps Real',
                             data: [],
                             borderColor: '#f97316',
+                            backgroundColor: 'rgba(249, 115, 22, 0.05)',
+                            fill: true,
                             borderWidth: 2,
-                            borderDash: [3, 3],
                             pointRadius: 0,
-                            tension: 0.2,
-                            spanGaps: false
-                        },
-                        {
-                            label: 'Simulació Slider',
-                            data: [],
-                            borderColor: '#ffffff',
-                            borderWidth: 2,
-                            pointRadius: 2,
-                            tension: 0.2,
-                            spanGaps: false
+                            tension: 0.3,
+                            borderDash: [2, 2]
                         }
                     ]
                 },
@@ -426,9 +402,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                             padding: 10,
                             callbacks: {
                                 label: function(context) {
-                                    let l = context.dataset.label || '';
-                                    if (context.parsed.y !== null && context.parsed.y !== undefined) {
-                                        return ` ${l}: ${context.parsed.y.toFixed(2)} $`;
+                                    const l = context.dataset.label || '';
+                                    const v = context.parsed.y;
+                                    if (v !== null && v !== undefined) {
+                                        if (v >= 10000) return ` ${l}: ${(v/1000).toFixed(1)}k $`;
+                                        return ` ${l}: ${v.toFixed(0)} $`;
                                     }
                                     return null;
                                 }
@@ -438,14 +416,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     scales: {
                         x: {
                             grid: { color: 'rgba(255, 255, 255, 0.04)' },
-                            ticks: { color: '#94a3b8', font: { size: 11 } }
+                            ticks: { color: '#94a3b8', font: { size: 11 }, maxRotation: 45 }
                         },
                         y: {
                             grid: { color: 'rgba(255, 255, 255, 0.04)' },
                             ticks: {
                                 color: '#94a3b8',
                                 font: { size: 11 },
-                                callback: function(v) { return v.toFixed(0) + ' $'; }
+                                callback: function(v) {
+                                    if (v >= 10000) return (v/1000).toFixed(0) + 'k $';
+                                    if (v >= 1000) return (v/1000).toFixed(1) + 'k $';
+                                    return v.toFixed(0) + ' $';
+                                }
                             }
                         }
                     }
@@ -458,173 +440,144 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
             const data = cachedStatusData;
             const m = data.metrics || {};
-            const curBal = (typeof m.balance === 'number') ? m.balance : 1000.0;
+            const curBal = (typeof m.balance === 'number') ? m.balance : 935.0;
             const initialBal = (typeof m.initial_balance === 'number' && m.initial_balance > 0) ? m.initial_balance : curBal;
-            const curPace = (typeof m.trades_per_hour === 'number' && m.trades_per_hour > 0) ? m.trades_per_hour : 4.0;
-            const avgProfit = (data.projections && data.projections.avg_pnl_per_trade && data.projections.avg_pnl_per_trade > 0) ? data.projections.avg_pnl_per_trade : 0.25;
 
-            const profitPerTrade = avgProfit;
-            const ratePerTrade = profitPerTrade / curBal;
+            // Calcular APR real des de l'inici
+            const uptimeStr = data.uptime || '00h 00m 00s';
+            const uptimeParts = uptimeStr.split(/[hms ]+/).filter(x => x);
+            const uptimeHours = uptimeParts.length >= 2 ? (parseInt(uptimeParts[0]||0) + parseInt(uptimeParts[1]||0)/60) : 0.01;
+            const realGrowthRate = (curBal / initialBal - 1); // Growth since start
+            const realAprFromData = uptimeHours > 0.5 ? (realGrowthRate / uptimeHours * 8760 * 100) : 0;
 
-            // 1. Punts històrics reals (evitem la caiguda fictícia des de 1000$)
-            const hist = data.equity_history || [];
-            const recentHist = hist.length > 8 ? hist.slice(-8) : hist;
-            
-            let labels = [];
-            let realData = [];
+            // Obtenir APR ponderat de les posicions actives
+            const netCarryApr = (typeof m.net_carry_apr === 'number') ? m.net_carry_apr : 0;
 
-            if (recentHist.length > 0) {
-                recentHist.forEach((pt, idx) => {
-                    const isLast = idx === recentHist.length - 1;
-                    const lbl = isLast ? 'Ara' : (pt.trades ? `T${pt.trades}` : `H${idx}`);
-                    labels.push(lbl);
-                    realData.push(pt.equity);
-                });
-            } else {
-                labels.push('Inici', 'Ara');
-                realData.push(initialBal, curBal);
+            // Escenaris APR anual (compost mensualment)
+            const scenarios = {
+                optimistic:   0.30,  // 30% anual
+                realistic:    0.20,  // 20% anual
+                conservative: 0.12,  // 12% anual
+            };
+
+            // Ritme temps real: extrapolat de l'APR observat dels funding rates actuals
+            // Usem el net_carry_apr del backend si disponible, si no l'APR real mesurat
+            let realtimeApr = 0;
+            if (netCarryApr > 0) {
+                realtimeApr = netCarryApr / 100; // ja ve en %
+            } else if (uptimeHours > 1) {
+                realtimeApr = realGrowthRate / uptimeHours * 8760;
             }
 
-            const junctionIdx = labels.length - 1;
+            // Generar labels i dades segons l'horitzó (en mesos)
+            const totalMonths = currentHorizon;
+            let stepMonths = 1;
+            if (totalMonths >= 60) stepMonths = 3;   // cada trimestre
+            if (totalMonths >= 120) stepMonths = 6;   // cada semestre
 
-            // 2. Passos temporals futurs segons horitzó
-            let stepHours = 2;
-            if (currentHorizon === 72) stepHours = 6;
-            else if (currentHorizon === 168) stepHours = 12;
-            else if (currentHorizon === 720) stepHours = 48;
+            let labels = ['Ara'];
+            let realData = [curBal];
 
-            const numSteps = Math.round(currentHorizon / stepHours);
-            let futureHours = [];
-            for (let i = 1; i <= numSteps; i++) {
-                const h = i * stepHours;
-                futureHours.push(h);
-                if (currentHorizon <= 24) {
-                    labels.push(`+${h}h`);
-                } else if (currentHorizon <= 72) {
-                    labels.push(`+${h}h`);
-                } else if (currentHorizon <= 168) {
-                    const d = (h / 24).toFixed(1);
-                    labels.push(`+${d}d`);
+            // Corbes de projecció
+            let optData = [curBal];
+            let realstData = [curBal];
+            let consData = [curBal];
+            let rtData = [curBal];
+
+            // Equitat real històrica: mapegem els punts reals als primers mesos
+            const hist = data.equity_history || [];
+
+            for (let month = stepMonths; month <= totalMonths; month += stepMonths) {
+                // Label
+                if (month < 12) {
+                    labels.push(month + 'm');
+                } else if (month % 12 === 0) {
+                    labels.push((month/12) + ' any' + (month > 12 ? 's' : ''));
                 } else {
-                    const d = Math.round(h / 24);
-                    labels.push(`+${d}d`);
+                    labels.push(Math.floor(month/12) + 'a ' + (month%12) + 'm');
                 }
+
+                // Creixement compost mensual: capital * (1 + APR/12)^mes
+                optData.push(curBal * Math.pow(1 + scenarios.optimistic/12, month));
+                realstData.push(curBal * Math.pow(1 + scenarios.realistic/12, month));
+                consData.push(curBal * Math.pow(1 + scenarios.conservative/12, month));
+                rtData.push(curBal * Math.pow(1 + realtimeApr/12, month));
+
+                // Equitat real: només tenim dades dels primers minuts/hores
                 realData.push(null);
             }
 
-            // Funció per calcular la corba composta amb paràmetres específics per escenari
-            function calcCurve(pace, tradePnl) {
-                let arr = new Array(junctionIdx).fill(null);
-                arr.push(curBal); // unió exacta a 'Ara'
-                const pft = (typeof tradePnl === 'number') ? tradePnl : profitPerTrade;
-                const rate = pft / curBal;
-                for (let i = 0; i < futureHours.length; i++) {
-                    const h = futureHours[i];
-                    const numTrades = pace * h;
-                    const bal = curBal * Math.pow(1.0 + rate, numTrades);
-                    arr.push(bal);
-                }
-                return arr;
-            }
-
-            const actualCurve = calcCurve(curPace, profitPerTrade);
-            const targetCurve = calcCurve(4.5, 0.25);
-            const consCurve = calcCurve(2.5, 0.20);
-            const nyCurve = calcCurve(7.5, 0.30);
-            const customCurve = calcCurve(customSliderPace, profitPerTrade);
-
             chartInstance.data.labels = labels;
             chartInstance.data.datasets[0].data = realData;
-            chartInstance.data.datasets[1].data = actualCurve;
-            chartInstance.data.datasets[2].data = targetCurve;
-            chartInstance.data.datasets[3].data = consCurve;
-            chartInstance.data.datasets[4].data = nyCurve;
-            chartInstance.data.datasets[5].data = customCurve;
+            chartInstance.data.datasets[1].data = optData;
+            chartInstance.data.datasets[2].data = realstData;
+            chartInstance.data.datasets[3].data = consData;
+            chartInstance.data.datasets[4].data = rtData;
 
-            // Visibilitat de datasets
+            // Visibilitat
             chartInstance.data.datasets[0].hidden = !curveVisibility.real;
-            chartInstance.data.datasets[1].hidden = !curveVisibility.actual;
-            chartInstance.data.datasets[2].hidden = !curveVisibility.target;
+            chartInstance.data.datasets[1].hidden = !curveVisibility.optimistic;
+            chartInstance.data.datasets[2].hidden = !curveVisibility.realistic;
             chartInstance.data.datasets[3].hidden = !curveVisibility.conservative;
-            chartInstance.data.datasets[4].hidden = !curveVisibility.ny;
-            chartInstance.data.datasets[5].hidden = !curveVisibility.custom;
+            chartInstance.data.datasets[4].hidden = !curveVisibility.realtime;
 
             chartInstance.update('none');
 
-            // Actualització badge slider
-            const sliderFinalBal = customCurve[customCurve.length - 1];
-            const sliderGain = sliderFinalBal - curBal;
-            const sliderGainPct = (sliderGain / curBal) * 100;
-            const horizonLbl = currentHorizon === 24 ? '24h' : (currentHorizon === 72 ? '3 dies' : (currentHorizon === 168 ? '7 dies' : '30 dies'));
-            const sliderGainEl = document.getElementById('slider-gain-est');
-            if (sliderGainEl) {
-                sliderGainEl.innerHTML = `Est. a ${horizonLbl}: <b style="color: #34d399;">${sliderFinalBal.toFixed(1)}$ (+${sliderGainPct.toFixed(1)}%)</b> <span style="color: #94a3b8; font-size: 0.78rem;">(~${(customSliderPace * profitPerTrade).toFixed(2)}$/h net)</span>`;
+            // Actualitzar badge APR en viu
+            const aprBadge = document.getElementById('live-apr-badge');
+            if (aprBadge) {
+                const activePos = (data.positions || []).length;
+                if (netCarryApr > 0) {
+                    aprBadge.innerHTML = `⚡ APR en viu: <b>${netCarryApr.toFixed(1)}%</b> (${activePos} pos)`;
+                    aprBadge.style.color = '#34d399';
+                } else if (activePos > 0) {
+                    aprBadge.innerHTML = `⏳ Acumulant funding... (${activePos} pos)`;
+                    aprBadge.style.color = '#facc15';
+                } else {
+                    aprBadge.innerHTML = `🔍 Buscant oportunitats...`;
+                    aprBadge.style.color = '#94a3b8';
+                }
             }
 
-            // Actualització KPIs de simulació
+            // Actualitzar KPIs
             const kpiRealBal = document.getElementById('kpi-real-bal');
-            if (kpiRealBal) kpiRealBal.innerText = `${curBal.toFixed(2)} $`;
+            if (kpiRealBal) kpiRealBal.innerText = `${curBal.toFixed(0)} $`;
             const kpiRealSub = document.getElementById('kpi-real-sub');
             if (kpiRealSub) {
-                const totalTrades = m.total_trades || 0;
-                if (totalTrades === 0) {
-                    kpiRealSub.innerText = `${(m.realized_pnl || 0) >= 0 ? '+' : ''}${(m.realized_pnl || 0).toFixed(2)}$ (Monitoritzant en viu)`;
-                } else {
-                    kpiRealSub.innerText = `${(m.realized_pnl || 0) >= 0 ? '+' : ''}${(m.realized_pnl || 0).toFixed(2)}$ (${fmtNum(m.winrate_pct, 0)}% winrate)`;
-                }
+                const activePos = (data.positions || []).length;
+                const pnl = curBal - initialBal;
+                kpiRealSub.innerText = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}$ | ${activePos} posicions`;
             }
 
-            const est24 = curBal * Math.pow(1.0 + ratePerTrade, curPace * 24);
-            const kpi24 = document.getElementById('kpi-24h-val');
-            if (kpi24) kpi24.innerText = `~${est24.toFixed(1)} $`;
-            const kpi24Sub = document.getElementById('kpi-24h-sub');
-            if (kpi24Sub) kpi24Sub.innerText = `+${((est24 - curBal) / curBal * 100).toFixed(1)}% (${curPace.toFixed(1)} op/h • ~${profitPerTrade.toFixed(2)}$)`;
+            // KPI 1 Any (20% realista)
+            const est1y = curBal * Math.pow(1 + scenarios.realistic/12, 12);
+            const kpi1y = document.getElementById('kpi-1y-val');
+            if (kpi1y) kpi1y.innerText = `~${est1y.toFixed(0)} $`;
+            const kpi1ySub = document.getElementById('kpi-1y-sub');
+            if (kpi1ySub) kpi1ySub.innerText = `+${((est1y-curBal)/curBal*100).toFixed(0)}% (${((est1y-curBal)/12).toFixed(1)}$/mes)`;
 
-            const est7d = curBal * Math.pow(1.0 + ratePerTrade, curPace * 168);
-            const kpi7d = document.getElementById('kpi-7d-val');
-            if (kpi7d) kpi7d.innerText = `~${est7d.toFixed(1)} $`;
-            const kpi7dSub = document.getElementById('kpi-7d-sub');
-            if (kpi7dSub) kpi7dSub.innerText = `+${((est7d - curBal) / curBal * 100).toFixed(1)}% compost (7 dies)`;
+            // KPI 5 Anys
+            const est5y = curBal * Math.pow(1 + scenarios.realistic/12, 60);
+            const kpi5y = document.getElementById('kpi-5y-val');
+            if (kpi5y) kpi5y.innerText = `~${est5y >= 1000 ? (est5y/1000).toFixed(1)+'k' : est5y.toFixed(0)} $`;
+            const kpi5ySub = document.getElementById('kpi-5y-sub');
+            if (kpi5ySub) kpi5ySub.innerText = `+${((est5y-curBal)/curBal*100).toFixed(0)}% acumulat`;
 
-            const est30d = curBal * Math.pow(1.0 + ratePerTrade, curPace * 720);
-            const kpi30d = document.getElementById('kpi-30d-val');
-            if (kpi30d) kpi30d.innerText = `~${est30d.toFixed(0)} $`;
-            const kpi30dSub = document.getElementById('kpi-30d-sub');
-            if (kpi30dSub) kpi30dSub.innerText = `+${((est30d - curBal) / curBal * 100).toFixed(0)}% compost mensual`;
-
-            // Estat Sessió NY
-            const ny = data.ny_session || {};
-            const nyBadge = document.getElementById('ny-session-badge');
-            const nyKpiVal = document.getElementById('kpi-ny-val');
-            const nyKpiSub = document.getElementById('kpi-ny-sub');
-            if (nyBadge) {
-                if (ny.is_open) {
-                    nyBadge.className = 'ny-badge ny-open';
-                    nyBadge.innerText = '🟢 Sessió NY Oberta (Màxima Volatilitat)';
-                    if (nyKpiVal) { nyKpiVal.innerText = 'Oberta 🟢'; nyKpiVal.className = 'kpi-val green'; }
-                    if (nyKpiSub) nyKpiSub.innerText = 'Spreads màxims en curs';
-                } else if (ny.is_premarket) {
-                    nyBadge.className = 'ny-badge ny-pre';
-                    nyBadge.innerText = `🔔 Pre-Market NY (${ny.status_text || 'Obertura propera'})`;
-                    if (nyKpiVal) { nyKpiVal.innerText = `${ny.minutes_to_open || 30} min`; nyKpiVal.className = 'kpi-val yellow'; }
-                    if (nyKpiSub) nyKpiSub.innerText = 'Obertura Wall St 15:30 CET';
-                } else {
-                    nyBadge.className = 'ny-badge ny-closed';
-                    nyBadge.innerText = '🌙 Sessió NY Tancada';
-                    if (nyKpiVal) { nyKpiVal.innerText = 'Tancada'; nyKpiVal.className = 'kpi-val'; }
-                    if (nyKpiSub) nyKpiSub.innerText = 'Règim normal DEX-to-DEX';
-                }
-            }
+            // KPI 10 Anys
+            const est10y = curBal * Math.pow(1 + scenarios.realistic/12, 120);
+            const kpi10y = document.getElementById('kpi-10y-val');
+            if (kpi10y) kpi10y.innerText = `~${est10y >= 1000 ? (est10y/1000).toFixed(1)+'k' : est10y.toFixed(0)} $`;
+            const kpi10ySub = document.getElementById('kpi-10y-sub');
+            if (kpi10ySub) kpi10ySub.innerText = `+${((est10y-curBal)/curBal*100).toFixed(0)}% compost`;
         }
 
         function setHorizon(h) {
             currentHorizon = h;
             const btns = document.querySelectorAll('.btn-horizon');
             btns.forEach(b => b.classList.remove('active'));
-            if (h === 24 && btns[0]) btns[0].classList.add('active');
-            else if (h === 72 && btns[1]) btns[1].classList.add('active');
-            else if (h === 168 && btns[2]) btns[2].classList.add('active');
-            else if (h === 720 && btns[3]) btns[3].classList.add('active');
+            if (h === 12 && btns[0]) btns[0].classList.add('active');
+            else if (h === 60 && btns[1]) btns[1].classList.add('active');
+            else if (h === 120 && btns[2]) btns[2].classList.add('active');
             updateChartData();
         }
 
@@ -648,12 +601,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
-        function onSliderInput(val) {
-            customSliderPace = parseFloat(val);
-            const lbl = document.getElementById('slider-label');
-            if (lbl) lbl.innerText = `${customSliderPace.toFixed(1)} op/h`;
-            updateChartData();
-        }
+
 
         async function setOrderSize(sz) {
             try {
