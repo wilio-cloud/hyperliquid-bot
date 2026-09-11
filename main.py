@@ -370,7 +370,15 @@ class ArbitrageTradingBotApp:
         # 1. Comprova tancaments de posicions obertes
         for pos in list(self.exchange.active_positions.values()):
             if pos.coin == coin:
-                if getattr(pos, "strategy_type", "SPREAD_SCALP") == "FUNDING_CARRY":
+                # FIX: En mode funding_carry, TOTES les posicions usen carry exit
+                use_carry = (
+                    self.strategy_mode == "funding_carry" or
+                    getattr(pos, "strategy_type", "SPREAD_SCALP") == "FUNDING_CARRY"
+                )
+                if use_carry:
+                    # Auto-upgrade strategy_type si és legacy
+                    if getattr(pos, "strategy_type", "") != "FUNDING_CARRY":
+                        pos.strategy_type = "FUNDING_CARRY"
                     exit_eval = self.carry_strategy.check_exit(pos)
                 else:
                     exit_eval = self.strategy.check_exit(pos)

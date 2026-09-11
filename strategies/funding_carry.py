@@ -229,7 +229,10 @@ class FundingCarryStrategy:
             # A) Inversió total (APR <= 0%): tanquem perquè la posició començaria a pagar funding.
             # B) Compressió (APR <= min_exit_apr): tanquem un cop complert el temps mínim si cobreix comissions.
             if current_net_apr <= 0.0:
-                return (f"FUNDING_INVERSION_EXIT (APR: {current_net_apr:.1f}%)", hl_exit_px, bn_exit_px)
+                if projected_net_pnl >= 0.0:
+                    return (f"FUNDING_INVERSION_EXIT (APR: {current_net_apr:.1f}%)", hl_exit_px, bn_exit_px)
+                else:
+                    logger.debug(f"⚠️ {pos.coin}: APR invertit ({current_net_apr:.1f}%) però PnL negatiu ({projected_net_pnl:.3f}$). Mantenint posició.")
             if (pos_age_hours >= self.min_holding_hours or pos.funding_payouts_count >= 1) and current_net_apr <= self.min_exit_apr:
                 if projected_net_pnl >= 0.0:
                     return (f"FUNDING_COMPRESSION_EXIT (APR: {current_net_apr:.1f}%)", hl_exit_px, bn_exit_px)
@@ -266,7 +269,10 @@ class FundingCarryStrategy:
                 return ("WINDFALL_TAKE_PROFIT", hl_exit_px, bn_exit_px)
 
             if current_net_apr <= 0.0:
-                return (f"FUNDING_INVERSION_EXIT (APR: {current_net_apr:.1f}%)", hl_exit_px, bn_exit_px)
+                if projected_net_pnl >= 0.0:
+                    return (f"FUNDING_INVERSION_EXIT (APR: {current_net_apr:.1f}%)", hl_exit_px, bn_exit_px)
+                else:
+                    logger.debug(f"⚠️ {pos.coin}: APR invertit ({current_net_apr:.1f}%) però PnL negatiu ({projected_net_pnl:.3f}$). Mantenint posició.")
             if (pos_age_hours >= self.min_holding_hours or pos.funding_payouts_count >= 1) and current_net_apr <= self.min_exit_apr:
                 if projected_net_pnl >= 0.0:
                     return (f"FUNDING_COMPRESSION_EXIT (APR: {current_net_apr:.1f}%)", hl_exit_px, bn_exit_px)

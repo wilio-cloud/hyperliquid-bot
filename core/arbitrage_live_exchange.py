@@ -262,9 +262,10 @@ class ArbitrageLiveExchange(ArbitragePaperExchange):
                             leg_bn=leg_bn,
                             entry_spread_pct=max(entry_spread, 0.180),
                             entry_time=parsed_entry_time,
+                            strategy_type="FUNDING_CARRY",  # FIX: Reconciliar amb el tipus correcte
                         )
                         self.active_positions[pair_id] = pos_obj
-                        logger.info(f"✅ Reconciliada posició activa existent per a {coin} ({pair_id}) amb mida 1:1 {matched_sz}")
+                        logger.info(f"✅ Reconciliada posició activa per a {coin} ({pair_id}) mida 1:1 {matched_sz} [FUNDING_CARRY]")
 
             # Si una posició local ja està tancada als brokers, l'eliminem
             for coin, pair_id in list(existing_active_coins.items()):
